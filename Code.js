@@ -75,6 +75,11 @@ function doGet(e) {
 
     const tpl = HtmlService.createTemplateFromFile("ppap_form.html");
     tpl.configJson = JSON.stringify(config);
+    tpl.carNo = e && e.parameter && e.parameter.car ? e.parameter.car : "";
+    const prevOdoData = tpl.carNo
+      ? getPrevOdoData(tpl.carNo)
+      : { prevOdo: null, prevDate: null, carName: "" };
+    tpl.prevOdoJson = JSON.stringify(prevOdoData);
 
     return tpl
       .evaluate()
@@ -178,7 +183,10 @@ function saveRecord(payload) {
 
   const now = new Date();
   const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
-  const 차량번호 = payload.carNo;
+  const 차량번호 = (payload.carNo || "").trim();
+  if (!차량번호)
+    throw new Error("차량번호 누락 — QR URL의 ?car= 파라미터를 확인하세요.");
+  Logger.log("[saveRecord] 차량번호=" + 차량번호 + " / 성명=" + payload.name);
   const 주행후 = Number(payload.currentOdo);
   const 주행전 = payload.prevOdo !== null ? Number(payload.prevOdo) : 주행후;
   const 주행거리 = 주행후 - 주행전;
@@ -262,18 +270,19 @@ function writeToXlsxSheet(ss, data) {
 
   const isFixed = FIXED_CAR_PATTERN.indexOf(data.차량번호) !== -1;
 
-  // 빈 행 찾기: A열(사용일자)이 비어 있는 첫 번째 행
+  // 빈 행 찾기
+  // - 고정 차량: J열(성명)이 비어있는 첫 번째 행 (N열은 값, T열은 수식으로 미리 채워질 수 있음)
+  // - 공용 차량: T열(주행후)이 비어있는 첫 번째 행 (N열엔 =T이전행 수식이 미리 깔려 있음)
+  const checkCol = isFixed ? XLSX_COL.성명 : XLSX_COL.주행후; // J=10 or T=20
   let targetRow = XLSX_DATA_START_ROW;
   const maxRow = sh.getLastRow();
   for (let r = XLSX_DATA_START_ROW; r <= maxRow + 1; r++) {
-    const aVal = sh.getRange(r, XLSX_COL.사용일자).getValue();
-    const nVal = sh.getRange(r, XLSX_COL.주행전).getValue();
-    // 빈 행 = A열과 N열 모두 비어있는 경우
-    if (!aVal && (nVal === "" || nVal === null)) {
+    const val = sh.getRange(r, checkCol).getValue();
+    if (val === "" || val === null) {
       targetRow = r;
       break;
     }
-    targetRow = r + 1; // 계속 채워져 있으면 다음 행
+    targetRow = r + 1;
   }
 
   const r = targetRow;

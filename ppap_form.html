@@ -194,7 +194,6 @@
         color: var(--accent);
       }
 
-      /* 거래처 드롭다운 + 직접입력 조합 */
       .note-combo {
         display: flex;
         flex-direction: column;
@@ -332,7 +331,6 @@
       .error-msg.show {
         display: block;
       }
-
       .auto-value {
         font-size: 16px;
         font-weight: 500;
@@ -342,12 +340,17 @@
     </style>
   </head>
   <body>
+    <!-- 서버에서 주입되는 설정값들 -->
     <script id="config-raw" type="application/json">
       <?!= configJson ?>
     </script>
     <script id="car-raw" type="application/json">
       <?!= carNo ?>
     </script>
+    <script id="prevodo-raw" type="application/json">
+      <?!= prevOdoJson ?>
+    </script>
+
     <div class="overlay" id="overlay">
       <div class="spinner"></div>
       <div class="overlay-text">저장 중...</div>
@@ -423,7 +426,7 @@
           <div class="field-err" id="odoErr">올바른 값을 입력해 주세요</div>
         </div>
 
-        <!-- 비고 (출장용: 거래처 드롭다운+직접입력 / 고정차량: 일반 텍스트) -->
+        <!-- 비고 -->
         <div class="field" id="fieldNote">
           <div class="field-label" id="noteLabel">비고 (선택)</div>
           <div id="noteGeneral">
@@ -471,15 +474,14 @@
     </div>
 
     <script>
-      // ── GAS 템플릿으로 주입된 설정값 ─────────────────────────
-      const configData = document.getElementById("config-raw").textContent;
-      const _CONFIG = JSON.parse(configData);
-
+      // ── 서버 주입 값 파싱 ──────────────────────────────────
+      const _CONFIG = JSON.parse(
+        document.getElementById("config-raw").textContent,
+      );
       const STAFF = _CONFIG.staff;
       const FIXED_USER = _CONFIG.fixedUser;
       const BUSINESS_TRIP_CARS = _CONFIG.businessTripCars;
 
-      // ── 배포 URL — 여기만 수정 ────────────────────────────────
       const GAS_URL =
         "https://script.google.com/macros/s/AKfycby-dyBA9relkwv5Y9_Yz7YhAUu7Unipp2NKPJzF78JTwVJvQhqw-nnPJEkrKiHMDGvNtQ/exec";
 
@@ -489,19 +491,14 @@
       let isBusinessTrip = false;
 
       window.onload = function () {
-        // 1. URL 파라미터에서 차량 번호 추출
-        // var params = new URLSearchParams(window.location.search);
-        // carNo = (params.get("car") || "").trim();
+        // 1. 서버 주입된 차량번호
         carNo = document.getElementById("car-raw").textContent.trim();
-
-        // [디버그] 브라우저 콘솔(F12)에서 확인용
         console.log("인식된 차량번호:", carNo);
-        console.log("가져온 직원 데이터:", STAFF);
 
-        // 2. 날짜 표시 (백틱 `${}` 대신 + 사용 - GAS 충돌 방지)
+        // 2. 날짜 표시
         var now = new Date();
         var days = ["일", "월", "화", "수", "목", "금", "토"];
-        var dateString =
+        document.getElementById("headerDate").textContent =
           now.getFullYear() +
           ". " +
           (now.getMonth() + 1) +
@@ -510,42 +507,53 @@
           ". (" +
           days[now.getDay()] +
           ")";
-        document.getElementById("headerDate").textContent = dateString;
 
-        // 3. 차량 번호가 없을 때 처리
+        // 3. 차량번호 헤더
         if (!carNo) {
           document.getElementById("headerCar").textContent = "차량 정보 없음";
           document.getElementById("prevOdoDisplay").textContent =
             "QR을 다시 스캔해 주세요";
-          // 여기서 return을 하지 않고 아래 드롭다운 생성 로직까지 흘러가게 둠
         } else {
           document.getElementById("headerCar").textContent = carNo;
         }
 
-        // 4. 출장용 차량 여부 확인
+        // 4. 이전 계기판 — 서버 주입값 사용 (fetch 없음)
+        var prevOdoData = JSON.parse(
+          document.getElementById("prevodo-raw").textContent,
+        );
+        if (prevOdoData.prevOdo !== null && prevOdoData.prevOdo !== undefined) {
+          prevOdo = prevOdoData.prevOdo;
+          document.getElementById("prevOdoDisplay").textContent =
+            Number(prevOdo).toLocaleString() + " km";
+          document.getElementById("prevOdoSub").textContent =
+            prevOdoData.prevDate ? "최근 기록: " + prevOdoData.prevDate : "";
+        } else {
+          prevOdo = null;
+          document.getElementById("prevOdoDisplay").textContent = "최초 등록";
+          document.getElementById("prevOdoDisplay").classList.add("warn");
+          document.getElementById("prevBanner").classList.add("warn");
+          document.getElementById("prevOdoSub").textContent =
+            "직전 기록이 없습니다";
+        }
+
+        // 5. 출장용 차량 여부
         isBusinessTrip = BUSINESS_TRIP_CARS.indexOf(carNo) !== -1;
 
-        // 5. 고정 사용자 차량인지 체크 (오세진, 이창우 님 등)
+        // 6. 고정/공용 차량 분기
         var fixed = FIXED_USER[carNo];
         var fieldNameDiv = document.getElementById("fieldName");
         var deptDisplay = document.getElementById("deptDisplay");
         var sel = document.getElementById("selName");
 
         if (fixed) {
-          // 고정 차량이면 이름 입력칸 숨기고 자동 표시
           fieldNameDiv.style.display = "none";
           deptDisplay.textContent = fixed.dept + " · " + fixed.name;
           deptDisplay.style.color = "var(--text)";
           deptDisplay.style.fontStyle = "normal";
-          console.log("고정 차량 인식됨:", fixed.name);
         } else {
-          // 고정 차량이 아니면 드롭다운 생성
           fieldNameDiv.style.display = "block";
-
-          // 드롭다운 초기화 후 직원 목록 추가
           sel.innerHTML =
             '<option value="" disabled selected>성명 선택</option>';
-
           if (STAFF && STAFF.length > 0) {
             STAFF.forEach(function (person) {
               var opt = document.createElement("option");
@@ -553,21 +561,15 @@
               opt.textContent = person.name;
               sel.appendChild(opt);
             });
-            console.log("드롭다운 생성 완료 - 직원 수:", STAFF.length);
-          } else {
-            console.error(
-              "직원(STAFF) 데이터가 없습니다. _CONFIG를 확인하세요.",
-            );
           }
         }
 
-        // 6. 출장용 차량일 경우 UI 변경
+        // 7. 출장용 UI
         if (isBusinessTrip) {
           document.getElementById("noteLabel").innerHTML =
             '방문 거래처 <span class="req-dot"></span>';
           document.getElementById("noteGeneral").style.display = "none";
           document.getElementById("noteCombo").style.display = "block";
-
           document.getElementById("noteSelect").onchange = function () {
             var direct = document.getElementById("noteDirectInput");
             if (this.value === "__direct__") {
@@ -579,41 +581,7 @@
             document.getElementById("fieldNote").classList.remove("error");
           };
         }
-
-        // 7. 이전 계기판 데이터 가져오기
-        if (carNo) {
-          fetchPrevOdo(carNo);
-        }
       };
-
-      // 이전 계기판 조회
-      function fetchPrevOdo(carNo) {
-        fetch(`${GAS_URL}?action=getPrevOdo&car=${encodeURIComponent(carNo)}`)
-          .then((r) => r.json())
-          .then((data) => {
-            if (data.prevOdo !== null && data.prevOdo !== undefined) {
-              prevOdo = data.prevOdo;
-              document.getElementById("prevOdoDisplay").textContent =
-                Number(prevOdo).toLocaleString() + " km";
-              document.getElementById("prevOdoSub").textContent = data.prevDate
-                ? `최근 기록: ${data.prevDate}`
-                : "";
-            } else {
-              prevOdo = null;
-              document.getElementById("prevOdoDisplay").textContent =
-                "최초 등록";
-              document.getElementById("prevOdoDisplay").classList.add("warn");
-              document.getElementById("prevBanner").classList.add("warn");
-              document.getElementById("prevOdoSub").textContent =
-                "직전 기록이 없습니다";
-            }
-          })
-          .catch(() => {
-            document.getElementById("prevOdoDisplay").textContent =
-              "조회 실패 — 직접 확인 필요";
-            document.getElementById("prevBanner").classList.add("warn");
-          });
-      }
 
       // 성명 선택 → 부서 자동
       document
@@ -655,21 +623,24 @@
           return;
         }
         if (prevOdo !== null && val < prevOdo) {
-          errEl.textContent = `이전 계기판(${prevOdo.toLocaleString()}km)보다 작습니다`;
+          errEl.textContent =
+            "이전 계기판(" + prevOdo.toLocaleString() + "km)보다 작습니다";
           field.classList.add("error");
         } else if (prevOdo !== null && val - prevOdo > 500) {
-          errEl.textContent = `주행거리 ${(val - prevOdo).toLocaleString()}km — 확인해 주세요`;
+          errEl.textContent =
+            "주행거리 " +
+            (val - prevOdo).toLocaleString() +
+            "km — 확인해 주세요";
           field.classList.add("error");
         } else {
           field.classList.remove("error");
         }
       }
 
-      // 비고값 가져오기
+      // 비고값
       function getNoteValue() {
-        if (!isBusinessTrip) {
+        if (!isBusinessTrip)
           return document.getElementById("noteText").value.trim();
-        }
         const sel = document.getElementById("noteSelect").value;
         if (sel === "__direct__")
           return document.getElementById("noteDirectInput").value.trim();
@@ -696,7 +667,6 @@
           document.getElementById("fieldOdo").classList.add("error");
           valid = false;
         }
-        // 출장용 차량은 거래처 필수
         if (isBusinessTrip && !getNoteValue()) {
           document.getElementById("fieldNote").classList.add("error");
           valid = false;
@@ -712,51 +682,64 @@
           : STAFF.find(
               (s) => s.name === document.getElementById("selName").value,
             );
-
         const noteVal = getNoteValue();
 
-        fetch(GAS_URL, {
-          method: "POST",
-          body: JSON.stringify({
-            action: "submit",
-            carNo,
-            name: staff.name,
-            dept: staff.dept,
-            useType: selectedType,
-            currentOdo: odoVal,
-            prevOdo,
-            note: noteVal,
-          }),
-        })
-          .then((r) => r.json())
-          .then((data) => {
+        // google.script.run으로 직접 호출 (CORS 문제 없음)
+        google.script.run
+          .withSuccessHandler(function (data) {
             document.getElementById("overlay").classList.remove("show");
             if (data.success) {
               document.getElementById("mainForm").style.display = "none";
               const mileage = odoVal - (prevOdo || odoVal);
               document.getElementById("resultDetail").innerHTML =
-                `<span>차량</span> ${carNo}<br>
-               <span>운전자</span> ${staff.dept} ${staff.name}<br>
-               <span>주행 전</span> ${prevOdo ? prevOdo.toLocaleString() : "-"} km<br>
-               <span>주행 후</span> ${odoVal.toLocaleString()} km<br>
-               <span>주행거리</span> ${mileage.toLocaleString()} km<br>
-               <span>구분</span> ${selectedType}` +
+                "<span>차량</span> " +
+                carNo +
+                "<br>" +
+                "<span>운전자</span> " +
+                staff.dept +
+                " " +
+                staff.name +
+                "<br>" +
+                "<span>주행 전</span> " +
+                (prevOdo ? prevOdo.toLocaleString() : "-") +
+                " km<br>" +
+                "<span>주행 후</span> " +
+                odoVal.toLocaleString() +
+                " km<br>" +
+                "<span>주행거리</span> " +
+                mileage.toLocaleString() +
+                " km<br>" +
+                "<span>구분</span> " +
+                selectedType +
                 (noteVal
-                  ? `<br><span>${isBusinessTrip ? "거래처" : "비고"}</span> ${noteVal}`
+                  ? "<br><span>" +
+                    (isBusinessTrip ? "거래처" : "비고") +
+                    "</span> " +
+                    noteVal
                   : "");
               document.getElementById("resultArea").classList.add("show");
             } else {
-              throw new Error(data.message || "저장 실패");
+              document.getElementById("submitBtn").disabled = false;
+              document.getElementById("errorMsg").textContent =
+                data.message || "저장 실패";
+              document.getElementById("errorMsg").classList.add("show");
             }
           })
-          .catch((err) => {
+          .withFailureHandler(function (err) {
             document.getElementById("overlay").classList.remove("show");
             document.getElementById("submitBtn").disabled = false;
             document.getElementById("errorMsg").textContent =
-              "저장 중 오류가 발생했습니다. 다시 시도해 주세요. (" +
-              err.message +
-              ")";
+              "저장 중 오류가 발생했습니다. (" + err.message + ")";
             document.getElementById("errorMsg").classList.add("show");
+          })
+          .saveRecord({
+            carNo: carNo,
+            name: staff.name,
+            dept: staff.dept,
+            useType: selectedType,
+            currentOdo: odoVal,
+            prevOdo: prevOdo,
+            note: noteVal,
           });
       }
     </script>
