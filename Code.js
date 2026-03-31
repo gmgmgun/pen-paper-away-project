@@ -10,23 +10,44 @@ const CONFIG = {
   GAP_ALERT_DAYS: 3,
 };
 
+// ── 엑셀 양식 컬럼 위치 (1-based) ────────────────────────
+// A=1, F=6, J=10, N=14, T=20, Z=26, AF=32, AL=38, AR=44
+const XLSX_COL = {
+  사용일자: 1, // A
+  부서: 6, // F
+  성명: 10, // J
+  주행전: 14, // N
+  주행후: 20, // T
+  주행거리: 26, // Z
+  출퇴근: 32, // AF
+  일반업무: 38, // AL
+  비고: 44, // AR
+};
+
+const XLSX_DATA_START_ROW = 15; // 데이터 시작 행
+
+// 고정 사용자 차량 (1인 전담): T열 = =N+Z 수식, N열에 주행전 직접 입력
+// 출장/공용 차량: N열 = 이전행 T 수식, T열에 주행후 직접 입력, Z=T-N 수식
+const FIXED_CAR_PATTERN = ["240서7489", "07누8546"]; // 고정 차량 번호
+const SHARED_CAR_PATTERN = ["200호7074", "208호1041"]; // 공용/출장 차량 번호
+
 const COL = {
-  ID: 0, // A
-  차량번호: 1, // B
-  차종: 2, // C
-  사용일자: 3, // D
-  요일: 4, // E
-  부서: 5, // F
-  성명: 6, // G
-  주행전: 7, // H
-  주행후: 8, // I
-  주행거리: 9, // J
-  사용구분: 10, // K
-  출퇴근: 11, // L
-  일반업무: 12, // M
-  비고: 13, // N
-  플래그: 14, // O
-  타임스탬프: 15, // P
+  ID: 0,
+  차량번호: 1,
+  차종: 2,
+  사용일자: 3,
+  요일: 4,
+  부서: 5,
+  성명: 6,
+  주행전: 7,
+  주행후: 8,
+  주행거리: 9,
+  사용구분: 10,
+  출퇴근: 11,
+  일반업무: 12,
+  비고: 13,
+  플래그: 14,
+  타임스탬프: 15,
 };
 
 // ── GET: HTML 서빙 + JSON API ──────────────────────────────
@@ -34,7 +55,6 @@ function doGet(e) {
   try {
     const action = e && e.parameter ? e.parameter.action : null;
 
-    // JSON API — 이전 계기판 조회
     if (action === "getPrevOdo") {
       const carNo = e.parameter.car;
       if (!carNo) throw new Error("차량번호 없음");
@@ -44,10 +64,7 @@ function doGet(e) {
       ).setMimeType(ContentService.MimeType.JSON);
     }
 
-    // HTML 서빙 — 설정값을 템플릿으로 주입
     const props = PropertiesService.getScriptProperties();
-
-    // 모든 데이터를 하나의 객체로 묶음
     const config = {
       staff: JSON.parse(props.getProperty("STAFF_JSON") || "[]"),
       fixedUser: JSON.parse(props.getProperty("FIXED_USER_JSON") || "{}"),
@@ -57,7 +74,6 @@ function doGet(e) {
     };
 
     const tpl = HtmlService.createTemplateFromFile("ppap_form.html");
-    // JSON 문자열로 변환해서 하나만 전달
     tpl.configJson = JSON.stringify(config);
 
     return tpl
@@ -92,30 +108,69 @@ function doPost(e) {
 // ── 이전 계기판 조회 ──────────────────────────────────────
 function getPrevOdoData(carNo) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // 1) RAW 시트에서 최근 기록 조회
   const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
   const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
   const carName = getMasterValue(masterSh, carNo, "차종");
 
   const lastRow = rawSh.getLastRow();
-  if (lastRow < 2) return { prevOdo: null, prevDate: null, carName };
+  if (lastRow >= 2) {
+    const data = rawSh.getRange(2, 1, lastRow - 1, 16).getValues();
+    const carRows = data
+      .filter((r) => r[COL.차량번호] === carNo && r[COL.주행후] > 0)
+      .sort((a, b) => new Date(b[COL.사용일자]) - new Date(a[COL.사용일자]));
 
-  const data = rawSh.getRange(2, 1, lastRow - 1, 16).getValues();
-  const carRows = data
-    .filter((r) => r[COL.차량번호] === carNo && r[COL.주행후] > 0)
-    .sort((a, b) => new Date(b[COL.사용일자]) - new Date(a[COL.사용일자]));
+    if (carRows.length > 0) {
+      const latest = carRows[0];
+      const prevDate = Utilities.formatDate(
+        new Date(latest[COL.사용일자]),
+        "Asia/Seoul",
+        "yyyy-MM-dd",
+      );
+      return { prevOdo: latest[COL.주행후], prevDate, carName };
+    }
+  }
 
-  if (carRows.length === 0) return { prevOdo: null, prevDate: null, carName };
+  // 2) RAW에 없으면 해당 차량 탭 엑셀 시트에서 마지막 주행후 값 조회
+  const xlsxOdo = getLastOdoFromXlsxSheet(ss, carNo);
+  if (xlsxOdo !== null) {
+    return { prevOdo: xlsxOdo.odo, prevDate: xlsxOdo.date, carName };
+  }
 
-  const latest = carRows[0];
-  const prevDate = Utilities.formatDate(
-    new Date(latest[COL.사용일자]),
-    "Asia/Seoul",
-    "yyyy-MM-dd",
-  );
-  return { prevOdo: latest[COL.주행후], prevDate, carName };
+  return { prevOdo: null, prevDate: null, carName };
 }
 
-// ── 운행 기록 저장 ────────────────────────────────────────
+// ── 엑셀 시트에서 마지막 계기판 값 조회 ─────────────────
+function getLastOdoFromXlsxSheet(ss, carNo) {
+  const sh = ss.getSheetByName(carNo);
+  if (!sh) return null;
+
+  const isFixed = FIXED_CAR_PATTERN.indexOf(carNo) !== -1;
+  // 고정 차량: T열(주행후=수식), N열(주행전)에서 마지막 값
+  // 공용 차량: T열(주행후)에서 마지막 값
+  const odoCol = XLSX_COL.주행후; // T = 20
+
+  let lastRow = XLSX_DATA_START_ROW - 1;
+  const maxRow = sh.getLastRow();
+  for (let r = XLSX_DATA_START_ROW; r <= maxRow; r++) {
+    const dateVal = sh.getRange(r, XLSX_COL.사용일자).getValue();
+    const odoVal = sh.getRange(r, odoCol).getValue();
+    if (dateVal && odoVal && !isNaN(Number(odoVal))) {
+      lastRow = r;
+    }
+  }
+  if (lastRow < XLSX_DATA_START_ROW) return null;
+
+  const odo = Number(sh.getRange(lastRow, odoCol).getValue());
+  const rawDate = sh.getRange(lastRow, XLSX_COL.사용일자).getValue();
+  const date = rawDate
+    ? Utilities.formatDate(new Date(rawDate), "Asia/Seoul", "yyyy-MM-dd")
+    : null;
+  return { odo, date };
+}
+
+// ── 운행 기록 저장 (RAW + 엑셀 양식 탭) ──────────────────
 function saveRecord(payload) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
@@ -142,6 +197,7 @@ function saveRecord(payload) {
     prevOdo: payload.prevOdo,
   });
 
+  // 1) RAW 시트에 저장 (기존 방식 유지)
   const id = Utilities.getUuid();
   const newRow = new Array(16).fill("");
   newRow[COL.ID] = id;
@@ -164,8 +220,22 @@ function saveRecord(payload) {
     "Asia/Seoul",
     "yyyy-MM-dd HH:mm:ss",
   );
-
   rawSh.appendRow(newRow);
+
+  // 2) 차량별 엑셀 양식 탭에 저장
+  writeToXlsxSheet(ss, {
+    차량번호,
+    부서: payload.dept,
+    성명: payload.name,
+    주행전,
+    주행후,
+    주행거리,
+    출퇴근,
+    일반업무,
+    비고: payload.note || "",
+    사용일자: now,
+    요일: DAYS[now.getDay()],
+  });
 
   if (flags.length > 0) {
     sendAlertEmail({
@@ -180,6 +250,96 @@ function saveRecord(payload) {
   }
 
   return { success: true, id, mileage: 주행거리, flags };
+}
+
+// ── 엑셀 양식 탭에 행 추가 ───────────────────────────────
+function writeToXlsxSheet(ss, data) {
+  const sh = ss.getSheetByName(data.차량번호);
+  if (!sh) {
+    Logger.log("시트 없음: " + data.차량번호);
+    return;
+  }
+
+  const isFixed = FIXED_CAR_PATTERN.indexOf(data.차량번호) !== -1;
+
+  // 빈 행 찾기: A열(사용일자)이 비어 있는 첫 번째 행
+  let targetRow = XLSX_DATA_START_ROW;
+  const maxRow = sh.getLastRow();
+  for (let r = XLSX_DATA_START_ROW; r <= maxRow + 1; r++) {
+    const aVal = sh.getRange(r, XLSX_COL.사용일자).getValue();
+    const nVal = sh.getRange(r, XLSX_COL.주행전).getValue();
+    // 빈 행 = A열과 N열 모두 비어있는 경우
+    if (!aVal && (nVal === "" || nVal === null)) {
+      targetRow = r;
+      break;
+    }
+    targetRow = r + 1; // 계속 채워져 있으면 다음 행
+  }
+
+  const r = targetRow;
+  const dateStr =
+    data.사용일자.getMonth() +
+    1 +
+    "/" +
+    data.사용일자.getDate() +
+    "(" +
+    data.요일 +
+    ")";
+
+  // A열: 사용일자(요일)
+  sh.getRange(r, XLSX_COL.사용일자).setValue(dateStr);
+  // F열: 부서
+  sh.getRange(r, XLSX_COL.부서).setValue(data.부서);
+  // J열: 성명
+  sh.getRange(r, XLSX_COL.성명).setValue(data.성명);
+
+  if (isFixed) {
+    // 고정 차량 패턴: N=주행전(값), T=수식(=N+Z), Z=주행거리(값)
+    sh.getRange(r, XLSX_COL.주행전).setValue(data.주행전);
+    sh.getRange(r, XLSX_COL.주행후).setFormula("=N" + r + "+Z" + r);
+    sh.getRange(r, XLSX_COL.주행거리).setValue(data.주행거리);
+    // 출퇴근/일반업무
+    if (data.출퇴근 > 0) {
+      sh.getRange(r, XLSX_COL.출퇴근).setValue(data.출퇴근);
+      sh.getRange(r, XLSX_COL.일반업무).setValue(0);
+    } else {
+      sh.getRange(r, XLSX_COL.출퇴근).setValue(0);
+      sh.getRange(r, XLSX_COL.일반업무).setValue(data.일반업무);
+    }
+  } else {
+    // 공용/출장 차량 패턴: N=이전행T 수식(단 첫행은 값), T=주행후(값), Z=수식(T-N), AL=수식
+    if (r === XLSX_DATA_START_ROW) {
+      // 첫 데이터 행: N열은 초기 계기판 값
+      sh.getRange(r, XLSX_COL.주행전).setValue(data.주행전);
+    } else {
+      // 이후 행: N열 = 이전 행 T열 수식
+      sh.getRange(r, XLSX_COL.주행전).setFormula("=T" + (r - 1));
+    }
+    sh.getRange(r, XLSX_COL.주행후).setValue(data.주행후);
+    sh.getRange(r, XLSX_COL.주행거리).setFormula("=T" + r + "-N" + r);
+
+    // 출퇴근(AF열)과 일반업무(AL열)
+    sh.getRange(r, XLSX_COL.출퇴근).setValue(data.출퇴근 > 0 ? data.출퇴근 : 0);
+    sh.getRange(r, XLSX_COL.일반업무).setFormula("=Z" + r + "-AF" + r);
+  }
+
+  // AR열: 비고
+  if (data.비고) {
+    sh.getRange(r, XLSX_COL.비고).setValue(data.비고);
+  }
+
+  SpreadsheetApp.flush();
+  Logger.log(
+    "[XLSX 기록] " +
+      data.차량번호 +
+      " row" +
+      r +
+      " → " +
+      data.성명 +
+      " / " +
+      data.주행후 +
+      "km",
+  );
 }
 
 // ── 이상 감지 ─────────────────────────────────────────────
@@ -240,13 +400,12 @@ function sendAlertEmail({
   );
 }
 
-// ── 월간 리포트 생성 ──────────────────────────────────────
+// ── 월간 리포트 생성 (RAW 기준 — 별도 요약 시트 필요 시) ─
 function generateAllReports() {
   const now = new Date();
   const target = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const year = target.getFullYear();
   const month = target.getMonth() + 1;
-  // 차량 목록도 스크립트 속성에서 읽어옴
   const props = PropertiesService.getScriptProperties();
   const allCars = [
     ...Object.keys(JSON.parse(props.getProperty("FIXED_USER_JSON") || "{}")),
@@ -359,7 +518,6 @@ function getMasterRow(masterSh, carNo) {
 }
 
 // ── 스크립트 속성 초기 설정 ──────────────────────────────
-// config.json 수정 후 clasp push → 이 함수 실행 → 재배포
 function setupProperties() {
   const config = JSON.parse(
     HtmlService.createHtmlOutputFromFile("config").getContent(),

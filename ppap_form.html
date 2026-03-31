@@ -345,6 +345,9 @@
     <script id="config-raw" type="application/json">
       <?!= configJson ?>
     </script>
+    <script id="car-raw" type="application/json">
+      <?!= carNo ?>
+    </script>
     <div class="overlay" id="overlay">
       <div class="spinner"></div>
       <div class="overlay-text">저장 중...</div>
@@ -487,8 +490,9 @@
 
       window.onload = function () {
         // 1. URL 파라미터에서 차량 번호 추출
-        var params = new URLSearchParams(window.location.search);
-        carNo = (params.get("car") || "").trim();
+        // var params = new URLSearchParams(window.location.search);
+        // carNo = (params.get("car") || "").trim();
+        carNo = document.getElementById("car-raw").textContent.trim();
 
         // [디버그] 브라우저 콘솔(F12)에서 확인용
         console.log("인식된 차량번호:", carNo);
