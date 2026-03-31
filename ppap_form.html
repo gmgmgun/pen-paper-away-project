@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>운행 기록</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #F7F7F5;
+    --surface:  #FFFFFF;
+    --border:   #E2E2DC;
+    --text:     #1A1A18;
+    --muted:    #888884;
+    --accent:   #1E3A5F;
+    --accent-l: #E8EFF7;
+    --warn-l:   #FEF3C7;
+    --danger:   #991B1B;
+    --danger-l: #FEE2E2;
+    --radius:   10px;
+  }
+
+  body {
+    font-family: 'Noto Sans KR', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 0 0 40px;
+  }
+
+  .header {
+    background: var(--accent);
+    color: #fff;
+    padding: 20px 20px 18px;
+  }
+  .header-car {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    opacity: 0.7;
+    margin-bottom: 4px;
+  }
+  .header-title { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+  .header-date  { font-size: 12px; opacity: 0.65; margin-top: 4px; }
+
+  .prev-banner {
+    margin: 14px 16px 0;
+    background: var(--accent-l);
+    border: 1px solid #C5D8EE;
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .prev-banner.warn { background: var(--warn-l); border-color: #F6D860; }
+  .prev-label  { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+  .prev-value  { font-size: 17px; font-weight: 600; color: var(--accent); letter-spacing: -0.01em; }
+  .prev-value.warn { color: #92400E; }
+  .prev-sub    { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+  .form-body {
+    padding: 14px 16px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .field {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 13px 14px;
+  }
+  .field.error { border-color: #E24B4A; }
+
+  .field-label {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    margin-bottom: 7px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .req-dot {
+    width: 5px; height: 5px;
+    background: #E24B4A;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .field-err {
+    font-size: 11px;
+    color: #E24B4A;
+    margin-top: 5px;
+    display: none;
+  }
+  .field.error .field-err { display: block; }
+
+  select, input[type="number"], input[type="text"] {
+    width: 100%;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text);
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  select { cursor: pointer; }
+  select:invalid, select option[value=""] { color: var(--muted); }
+  input::placeholder { color: #C0C0BC; font-weight: 400; }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+  .toggle-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 7px;
+    margin-top: 2px;
+  }
+  .toggle-btn {
+    padding: 10px 0;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+  }
+  .toggle-btn.active {
+    background: var(--accent-l);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* 거래처 드롭다운 + 직접입력 조합 */
+  .note-combo { display: flex; flex-direction: column; gap: 8px; }
+  .note-divider {
+    font-size: 11px;
+    color: var(--muted);
+    text-align: center;
+    position: relative;
+  }
+  .note-divider::before, .note-divider::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    width: 40%;
+    height: 1px;
+    background: var(--border);
+  }
+  .note-divider::before { left: 0; }
+  .note-divider::after  { right: 0; }
+
+  .submit-wrap { padding: 16px 16px 0; }
+  .submit-btn {
+    width: 100%;
+    padding: 17px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: -0.01em;
+    transition: opacity 0.15s;
+  }
+  .submit-btn:active   { opacity: 0.85; }
+  .submit-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(255,255,255,0.85);
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 14px;
+    z-index: 100;
+  }
+  .overlay.show { display: flex; }
+  .spinner {
+    width: 36px; height: 36px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .overlay-text { font-size: 14px; color: var(--muted); }
+
+  .result {
+    display: none;
+    margin: 30px 16px 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 20px;
+    text-align: center;
+  }
+  .result.show     { display: block; }
+  .result-icon     { font-size: 36px; margin-bottom: 12px; }
+  .result-title    { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+  .result-sub      { font-size: 13px; color: var(--muted); line-height: 1.6; }
+  .result-detail   {
+    margin-top: 16px;
+    background: var(--bg);
+    border-radius: 8px;
+    padding: 12px 14px;
+    text-align: left;
+    font-size: 13px;
+    line-height: 2.2;
+  }
+  .result-detail span { color: var(--muted); font-size: 11px; }
+
+  .error-msg {
+    display: none;
+    margin: 10px 16px 0;
+    background: var(--danger-l);
+    border: 1px solid #FECACA;
+    border-radius: 8px;
+    padding: 11px 14px;
+    font-size: 13px;
+    color: var(--danger);
+  }
+  .error-msg.show { display: block; }
+
+  .auto-value {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--muted);
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+<div class="overlay" id="overlay">
+  <div class="spinner"></div>
+  <div class="overlay-text">저장 중...</div>
+</div>
+
+<div class="header">
+  <div class="header-car" id="headerCar">불러오는 중...</div>
+  <div class="header-title">운행 기록</div>
+  <div class="header-date" id="headerDate"></div>
+</div>
+
+<div class="prev-banner" id="prevBanner">
+  <div>
+    <div class="prev-label">직전 계기판 (주행 전)</div>
+    <div class="prev-value" id="prevOdoDisplay">불러오는 중...</div>
+    <div class="prev-sub"   id="prevOdoSub"></div>
+  </div>
+</div>
+
+<div id="mainForm">
+  <div class="form-body">
+
+    <!-- 성명 -->
+    <div class="field" id="fieldName">
+      <div class="field-label"><span class="req-dot"></span>성명</div>
+      <select id="selName">
+        <option value="" disabled selected>성명 선택</option>
+      </select>
+      <div class="field-err">성명을 선택해 주세요</div>
+    </div>
+
+    <!-- 부서 -->
+    <div class="field">
+      <div class="field-label">부서</div>
+      <div id="deptDisplay" class="auto-value">성명 선택 시 자동 입력</div>
+    </div>
+
+    <!-- 사용 구분 -->
+    <div class="field" id="fieldType">
+      <div class="field-label"><span class="req-dot"></span>사용 구분</div>
+      <div class="toggle-group">
+        <button type="button" class="toggle-btn" id="btnCommute"  onclick="selectType('출퇴근용')">출퇴근용</button>
+        <button type="button" class="toggle-btn" id="btnBusiness" onclick="selectType('일반업무용')">일반업무용</button>
+      </div>
+      <div class="field-err">사용 구분을 선택해 주세요</div>
+    </div>
+
+    <!-- 주행 후 계기판 -->
+    <div class="field" id="fieldOdo">
+      <div class="field-label"><span class="req-dot"></span>주행 후 계기판 (km)</div>
+      <input type="number" id="currentOdo" placeholder="예: 92540" inputmode="numeric" oninput="validateOdo()">
+      <div class="field-err" id="odoErr">올바른 값을 입력해 주세요</div>
+    </div>
+
+    <!-- 비고 (출장용: 거래처 드롭다운+직접입력 / 고정차량: 일반 텍스트) -->
+    <div class="field" id="fieldNote">
+      <div class="field-label" id="noteLabel">비고 (선택)</div>
+      <div id="noteGeneral">
+        <input type="text" id="noteText" placeholder="특이사항 입력">
+      </div>
+      <div id="noteCombo" style="display:none;">
+        <div class="note-combo">
+          <select id="noteSelect">
+            <option value="" selected>거래처 선택</option>
+            <option>하이닉스(이천)</option>
+            <option>하이닉스(청주)</option>
+            <option>엘에스이</option>
+            <option>제우스</option>
+            <option>아이엠티</option>
+            <option>엠투에스</option>
+            <option value="__direct__">직접 입력</option>
+          </select>
+          <div class="note-divider">또는</div>
+          <input type="text" id="noteDirectInput" placeholder="거래처 직접 입력" style="display:none;">
+        </div>
+      </div>
+      <div class="field-err">방문 거래처를 입력해 주세요</div>
+    </div>
+
+  </div>
+
+  <div class="error-msg" id="errorMsg"></div>
+
+  <div class="submit-wrap">
+    <button class="submit-btn" id="submitBtn" onclick="submitForm()">기록 저장</button>
+  </div>
+</div>
+
+<div class="result" id="resultArea">
+  <div class="result-icon">✅</div>
+  <div class="result-title">기록이 저장되었습니다</div>
+  <div class="result-sub">운행 기록이 정상적으로 제출되었습니다.</div>
+  <div class="result-detail" id="resultDetail"></div>
+</div>
+
+<script>
+// ============================================================
+// 설정값
+// ============================================================
+const GAS_URL = 'https://script.google.com/macros/s/AKfycby-dyBA9relkwv5Y9_Yz7YhAUu7Unipp2NKPJzF78JTwVJvQhqw-nnPJEkrKiHMDGvNtQ/exec';
+
+const STAFF = [
+  { name: '오세진', dept: '연구소' },
+  { name: '이창우', dept: '경영지원' },
+  { name: '홍길동', dept: '영업팀' },
+  // 직원 추가 시 여기에 계속 추가
+];
+
+// 사장님/소장님 전용 차량 — 드롭다운 없이 사용자 고정
+const FIXED_USER = {
+  '240서7489': { name: '오세진', dept: '연구소' },
+  '07누8546':  { name: '이창우', dept: '경영지원' },
+};
+
+// 출장용 공용 차량 — 거래처 드롭다운 표시
+const BUSINESS_TRIP_CARS = ['200호7074', '208호1041'];
+// ============================================================
+
+let carNo        = '';
+let prevOdo      = null;
+let selectedType = '';
+let isBusinessTrip = false;
+
+window.onload = function() {
+  const params = new URLSearchParams(window.location.search);
+  carNo = params.get('car') || '';
+
+  // 날짜
+  const now  = new Date();
+  const days = ['일','월','화','수','목','금','토'];
+  document.getElementById('headerDate').textContent =
+    `${now.getFullYear()}. ${now.getMonth()+1}. ${now.getDate()}. (${days[now.getDay()]})`;
+
+  if (!carNo) {
+    document.getElementById('headerCar').textContent = '차량 정보 없음';
+    document.getElementById('prevOdoDisplay').textContent = 'QR을 다시 스캔해 주세요';
+    return;
+  }
+
+  document.getElementById('headerCar').textContent = carNo;
+  isBusinessTrip = BUSINESS_TRIP_CARS.includes(carNo);
+
+  // 고정 사용자 차량
+  const fixed = FIXED_USER[carNo];
+  if (fixed) {
+    document.getElementById('fieldName').style.display = 'none';
+    const deptEl = document.getElementById('deptDisplay');
+    deptEl.textContent = `${fixed.dept} · ${fixed.name}`;
+    deptEl.style.color = 'var(--text)';
+    deptEl.style.fontStyle = 'normal';
+  } else {
+    const sel = document.getElementById('selName');
+    STAFF.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.name;
+      opt.textContent = s.name;
+      sel.appendChild(opt);
+    });
+  }
+
+  // 출장용 차량: 거래처 드롭다운 표시
+  if (isBusinessTrip) {
+    document.getElementById('noteLabel').innerHTML = '방문 거래처 <span class="req-dot"></span>';
+    document.getElementById('noteGeneral').style.display = 'none';
+    document.getElementById('noteCombo').style.display = 'block';
+
+    // "직접 입력" 선택 시 텍스트 필드 표시
+    document.getElementById('noteSelect').addEventListener('change', function() {
+      const direct = document.getElementById('noteDirectInput');
+      if (this.value === '__direct__') {
+        direct.style.display = 'block';
+        direct.focus();
+      } else {
+        direct.style.display = 'none';
+      }
+      document.getElementById('fieldNote').classList.remove('error');
+    });
+  }
+
+  fetchPrevOdo(carNo);
+};
+
+// 이전 계기판 조회
+function fetchPrevOdo(carNo) {
+  fetch(`${GAS_URL}?action=getPrevOdo&car=${encodeURIComponent(carNo)}`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.prevOdo !== null && data.prevOdo !== undefined) {
+        prevOdo = data.prevOdo;
+        document.getElementById('prevOdoDisplay').textContent =
+          Number(prevOdo).toLocaleString() + ' km';
+        document.getElementById('prevOdoSub').textContent =
+          data.prevDate ? `최근 기록: ${data.prevDate}` : '';
+      } else {
+        prevOdo = null;
+        document.getElementById('prevOdoDisplay').textContent = '최초 등록';
+        document.getElementById('prevOdoDisplay').classList.add('warn');
+        document.getElementById('prevBanner').classList.add('warn');
+        document.getElementById('prevOdoSub').textContent = '직전 기록이 없습니다';
+      }
+    })
+    .catch(() => {
+      document.getElementById('prevOdoDisplay').textContent = '조회 실패 — 직접 확인 필요';
+      document.getElementById('prevBanner').classList.add('warn');
+    });
+}
+
+// 성명 선택 → 부서 자동
+document.getElementById('selName').addEventListener('change', function() {
+  const found = STAFF.find(s => s.name === this.value);
+  const el    = document.getElementById('deptDisplay');
+  if (found) {
+    el.textContent   = found.dept;
+    el.style.color   = 'var(--text)';
+    el.style.fontStyle = 'normal';
+  } else {
+    el.textContent   = '성명 선택 시 자동 입력';
+    el.style.color   = 'var(--muted)';
+    el.style.fontStyle = 'italic';
+  }
+  document.getElementById('fieldName').classList.remove('error');
+});
+
+// 사용 구분
+function selectType(type) {
+  selectedType = type;
+  document.getElementById('btnCommute').classList.toggle('active',  type === '출퇴근용');
+  document.getElementById('btnBusiness').classList.toggle('active', type === '일반업무용');
+  document.getElementById('fieldType').classList.remove('error');
+}
+
+// 계기판 유효성
+function validateOdo() {
+  const val  = Number(document.getElementById('currentOdo').value);
+  const field = document.getElementById('fieldOdo');
+  const errEl = document.getElementById('odoErr');
+  if (!val) { field.classList.remove('error'); return; }
+  if (prevOdo !== null && val < prevOdo) {
+    errEl.textContent = `이전 계기판(${prevOdo.toLocaleString()}km)보다 작습니다`;
+    field.classList.add('error');
+  } else if (prevOdo !== null && (val - prevOdo) > 500) {
+    errEl.textContent = `주행거리 ${(val - prevOdo).toLocaleString()}km — 확인해 주세요`;
+    field.classList.add('error');
+  } else {
+    field.classList.remove('error');
+  }
+}
+
+// 비고값 가져오기
+function getNoteValue() {
+  if (!isBusinessTrip) {
+    return document.getElementById('noteText').value.trim();
+  }
+  const sel = document.getElementById('noteSelect').value;
+  if (sel === '__direct__') return document.getElementById('noteDirectInput').value.trim();
+  return sel;
+}
+
+// 제출
+function submitForm() {
+  let valid = true;
+  const fixed = FIXED_USER[carNo];
+
+  if (!fixed && !document.getElementById('selName').value) {
+    document.getElementById('fieldName').classList.add('error');
+    valid = false;
+  }
+  if (!selectedType) {
+    document.getElementById('fieldType').classList.add('error');
+    valid = false;
+  }
+  const odoVal = Number(document.getElementById('currentOdo').value);
+  if (!odoVal || odoVal <= 0) {
+    document.getElementById('odoErr').textContent = '계기판 값을 입력해 주세요';
+    document.getElementById('fieldOdo').classList.add('error');
+    valid = false;
+  }
+  // 출장용 차량은 거래처 필수
+  if (isBusinessTrip && !getNoteValue()) {
+    document.getElementById('fieldNote').classList.add('error');
+    valid = false;
+  }
+  if (!valid) return;
+
+  document.getElementById('overlay').classList.add('show');
+  document.getElementById('submitBtn').disabled = true;
+  document.getElementById('errorMsg').classList.remove('show');
+
+  const staff = fixed
+    ? fixed
+    : STAFF.find(s => s.name === document.getElementById('selName').value);
+
+  const noteVal = getNoteValue();
+
+  fetch(GAS_URL, {
+    method: 'POST',
+    body: JSON.stringify({
+      action:     'submit',
+      carNo,
+      name:       staff.name,
+      dept:       staff.dept,
+      useType:    selectedType,
+      currentOdo: odoVal,
+      prevOdo,
+      note:       noteVal,
+    }),
+  })
+  .then(r => r.json())
+  .then(data => {
+    document.getElementById('overlay').classList.remove('show');
+    if (data.success) {
+      document.getElementById('mainForm').style.display = 'none';
+      const mileage = odoVal - (prevOdo || odoVal);
+      document.getElementById('resultDetail').innerHTML =
+        `<span>차량</span> ${carNo}<br>
+         <span>운전자</span> ${staff.dept} ${staff.name}<br>
+         <span>주행 전</span> ${prevOdo ? prevOdo.toLocaleString() : '-'} km<br>
+         <span>주행 후</span> ${odoVal.toLocaleString()} km<br>
+         <span>주행거리</span> ${mileage.toLocaleString()} km<br>
+         <span>구분</span> ${selectedType}` +
+        (noteVal ? `<br><span>${isBusinessTrip ? '거래처' : '비고'}</span> ${noteVal}` : '');
+      document.getElementById('resultArea').classList.add('show');
+    } else {
+      throw new Error(data.message || '저장 실패');
+    }
+  })
+  .catch(err => {
+    document.getElementById('overlay').classList.remove('show');
+    document.getElementById('submitBtn').disabled = false;
+    document.getElementById('errorMsg').textContent =
+      '저장 중 오류가 발생했습니다. 다시 시도해 주세요. (' + err.message + ')';
+    document.getElementById('errorMsg').classList.add('show');
+  });
+}
+</script>
+</body>
+</html>
