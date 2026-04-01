@@ -10,25 +10,30 @@ const CONFIG = {
 };
 
 const COL = {
-  ID: 0, // A
-  차량번호: 1, // B
-  차종: 2, // C
-  사용일자: 3, // D
-  요일: 4, // E
-  부서: 5, // F
-  성명: 6, // G
-  주행전: 7, // H
-  주행후: 8, // I
-  주행거리: 9, // J
-  사용구분: 10, // K
-  출퇴근: 11, // L
-  일반업무: 12, // M
-  비고: 13, // N
-  플래그: 14, // O
-  타임스탬프: 15, // P
+  ID: 0,
+  차량번호: 1,
+  차종: 2,
+  사용일자: 3,
+  요일: 4,
+  부서: 5,
+  성명: 6,
+  주행전: 7,
+  주행후: 8,
+  주행거리: 9,
+  사용구분: 10,
+  출퇴근: 11,
+  일반업무: 12,
+  비고: 13,
+  플래그: 14,
+  타임스탬프: 15,
 };
 
-// ── GET: HTML 서빙 + JSON API ──────────────────────────────
+function getSpreadsheet() {
+  const id =
+    PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
+  return SpreadsheetApp.openById(id);
+}
+
 function doGet(e) {
   try {
     const props = PropertiesService.getScriptProperties();
@@ -41,10 +46,7 @@ function doGet(e) {
       clients: JSON.parse(props.getProperty("CLIENTS_JSON") || "[]"),
     };
 
-    // URL 파라미터에서 차량번호 추출
     const carNo = e && e.parameter && e.parameter.car ? e.parameter.car : "";
-
-    // 직전 계기판 데이터를 서버에서 미리 조회
     const prevOdoData = carNo
       ? getPrevOdoData(carNo)
       : { prevOdo: null, prevDate: null, carName: "" };
@@ -65,7 +67,6 @@ function doGet(e) {
   }
 }
 
-// ── POST: 운행 기록 저장 ───────────────────────────────────
 function doPost(e) {
   try {
     const payload = JSON.parse(e.postData.contents);
@@ -83,9 +84,8 @@ function doPost(e) {
   }
 }
 
-// ── 이전 계기판 조회 ──────────────────────────────────────
 function getPrevOdoData(carNo) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSpreadsheet();
   const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
   const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
   const carName = getMasterValue(masterSh, carNo, "차종");
@@ -96,7 +96,7 @@ function getPrevOdoData(carNo) {
   const data = rawSh.getRange(2, 1, lastRow - 1, 16).getValues();
   const carRows = data
     .filter((r) => r[COL.차량번호] === carNo && r[COL.주행후] > 0)
-    .sort((a, b) => new Date(b[COL.사용일자]) - new Date(a[COL.사용일자]));
+    .sort((a, b) => b[COL.주행후] - a[COL.주행후]);
 
   if (carRows.length === 0) return { prevOdo: null, prevDate: null, carName };
 
@@ -109,9 +109,8 @@ function getPrevOdoData(carNo) {
   return { prevOdo: latest[COL.주행후], prevDate, carName };
 }
 
-// ── 운행 기록 저장 ────────────────────────────────────────
 function saveRecord(payload) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSpreadsheet();
   const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
   const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
 
@@ -169,35 +168,40 @@ function saveRecord(payload) {
   // ② 차량별 탭 저장
   const carSh = ss.getSheetByName(차량번호);
   if (carSh) {
-    const dateStr = `${now.getMonth() + 1}/${now.getDate()}(${요일})`;
     const DATA_START_ROW = 15;
+    const dateStr = `${now.getMonth() + 1}/${now.getDate()}(${요일})`;
 
-    // 15행부터 B열 기준으로 마지막 데이터 행 탐색
     let lastDataRow = DATA_START_ROW - 1;
-    const lastRow = carSh.getLastRow();
-    for (let r = lastRow; r >= DATA_START_ROW; r--) {
-      if (carSh.getRange(r, 2).getValue() !== "") {
-        lastDataRow = r;
-        break;
+    const aCol = carSh.getRange(DATA_START_ROW, 1, 1000, 1).getValues();
+    for (let i = 0; i < aCol.length; i++) {
+      if (String(aCol[i][0]).trim() !== "") {
+        lastDataRow = DATA_START_ROW + i;
+      } else {
+        break; // 빈값 만나면 즉시 중단
       }
     }
 
     const insertRow = lastDataRow + 1;
-    carSh.getRange(insertRow, 2).setValue(dateStr);
-    carSh.getRange(insertRow, 3).setValue(payload.dept);
-    carSh.getRange(insertRow, 4).setValue(payload.name);
-    carSh.getRange(insertRow, 5).setValue(주행전);
-    carSh.getRange(insertRow, 6).setValue(주행후);
-    carSh.getRange(insertRow, 7).setValue(주행거리);
-    carSh.getRange(insertRow, 8).setValue(출퇴근);
-    carSh.getRange(insertRow, 9).setValue(일반업무);
-    carSh.getRange(insertRow, 10).setValue(payload.note || "");
+    carSh.getRange(insertRow, 1).setValue(dateStr);
+    carSh.getRange(insertRow, 6).setValue(payload.dept);
+    carSh.getRange(insertRow, 10).setValue(payload.name);
+
+    if (insertRow === DATA_START_ROW) {
+      carSh.getRange(insertRow, 14).setValue(주행전);
+    } else {
+      carSh.getRange(insertRow, 14).setFormula(`=T${insertRow - 1}`);
+    }
+
+    carSh.getRange(insertRow, 20).setValue(주행후);
+    carSh.getRange(insertRow, 26).setFormula(`=T${insertRow}-N${insertRow}`);
+    carSh.getRange(insertRow, 32).setValue(출퇴근);
+    carSh.getRange(insertRow, 38).setValue(일반업무);
+    carSh.getRange(insertRow, 44).setValue(payload.note || "");
   }
 
   return { success: true, id, mileage: 주행거리, flags };
 }
 
-// ── 이상 감지 ─────────────────────────────────────────────
 function detectAnomalies({
   rawSh,
   차량번호,
@@ -224,7 +228,7 @@ function detectAnomalies({
     const data = rawSh.getRange(2, 1, lastRow - 1, 16).getValues();
     const carRows = data
       .filter((r) => r[COL.차량번호] === 차량번호 && r[COL.주행후] > 0)
-      .sort((a, b) => new Date(b[COL.사용일자]) - new Date(a[COL.사용일자]));
+      .sort((a, b) => b[COL.주행후] - a[COL.주행후]);
     if (carRows.length > 0) {
       const dayGap = Math.floor(
         (사용일자 - new Date(carRows[0][COL.사용일자])) / (1000 * 60 * 60 * 24),
@@ -236,106 +240,65 @@ function detectAnomalies({
   return flags;
 }
 
-// ── 월간 리포트 생성 ──────────────────────────────────────
-function generateAllReports() {
-  const now = new Date();
-  const target = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const year = target.getFullYear();
-  const month = target.getMonth() + 1;
-  // 차량 목록도 스크립트 속성에서 읽어옴
-  const props = PropertiesService.getScriptProperties();
-  const allCars = [
-    ...Object.keys(JSON.parse(props.getProperty("FIXED_USER_JSON") || "{}")),
-    ...JSON.parse(props.getProperty("BUSINESS_TRIP_CARS_JSON") || "[]"),
-  ];
-  allCars.forEach((carNo) => generateMonthlyReport(carNo, year, month));
-}
-
-function generateMonthlyReport(targetCarNo, year, month) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+function syncAllCarSheets() {
+  const ss = getSpreadsheet();
   const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
-  const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
+  const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+  const DATA_START_ROW = 15;
 
-  const monthData = rawSh
+  const allData = rawSh
     .getDataRange()
     .getValues()
     .slice(1)
-    .filter((row) => {
-      const d = new Date(row[COL.사용일자]);
-      return (
-        row[COL.차량번호] === targetCarNo &&
-        d.getFullYear() === year &&
-        d.getMonth() + 1 === month
-      );
-    })
+    .filter(
+      (r) =>
+        r[COL.차량번호] &&
+        String(r[COL.차량번호]).trim() !== "" &&
+        r[COL.주행후] > 0,
+    )
     .sort((a, b) => new Date(a[COL.사용일자]) - new Date(b[COL.사용일자]));
 
-  if (monthData.length === 0) return;
-
-  const sheetName = `${targetCarNo}_${year}${String(month).padStart(2, "0")}`;
-  let reportSh = ss.getSheetByName(sheetName);
-  if (reportSh) ss.deleteSheet(reportSh);
-  reportSh = ss.insertSheet(sheetName);
-
-  const masterRow = getMasterRow(masterSh, targetCarNo);
-  const 차종 = masterRow ? masterRow[1] : "";
-  const 법인명 = masterRow ? masterRow[3] : "";
-  const 사업자번호 = masterRow ? masterRow[4] : "";
-
-  reportSh
-    .getRange("A1")
-    .setValue("【업무용승용차 운행기록부】 별지 제25호 서식");
-  reportSh.getRange("A2").setValue(`사업연도: ${year}년`);
-  reportSh
-    .getRange("A3")
-    .setValue(`법인명: ${법인명}   사업자등록번호: ${사업자번호}`);
-  reportSh
-    .getRange("A4")
-    .setValue(`①차종: ${차종}   ②자동차등록번호: ${targetCarNo}`);
-
-  const headers = [
-    "③사용일자(요일)",
-    "④부서",
-    "④성명",
-    "⑤주행전(km)",
-    "⑥주행후(km)",
-    "⑦주행거리(km)",
-    "⑧출퇴근용(km)",
-    "⑨일반업무용(km)",
-    "⑩비고",
-  ];
-  reportSh.getRange(6, 1, 1, headers.length).setValues([headers]);
-
-  const START = 7;
-  const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
-  monthData.forEach((row, idx) => {
-    const r = START + idx;
-    const d = new Date(row[COL.사용일자]);
-    const 주행전 = idx === 0 ? row[COL.주행전] : monthData[idx - 1][COL.주행후];
-    reportSh
-      .getRange(r, 1)
-      .setValue(`${d.getMonth() + 1}/${d.getDate()}(${DAYS[d.getDay()]})`);
-    reportSh.getRange(r, 2).setValue(row[COL.부서]);
-    reportSh.getRange(r, 3).setValue(row[COL.성명]);
-    reportSh.getRange(r, 4).setValue(주행전);
-    reportSh.getRange(r, 5).setValue(row[COL.주행후]);
-    reportSh.getRange(r, 6).setValue(row[COL.주행거리]);
-    reportSh.getRange(r, 7).setValue(row[COL.출퇴근]);
-    reportSh.getRange(r, 8).setValue(row[COL.일반업무]);
-    reportSh.getRange(r, 9).setValue(row[COL.비고]);
+  const carMap = {};
+  allData.forEach((r) => {
+    const car = String(r[COL.차량번호]).trim();
+    if (!carMap[car]) carMap[car] = [];
+    carMap[car].push(r);
   });
 
-  const sumRow = START + monthData.length;
-  reportSh.getRange(sumRow, 1).setValue("합 계");
-  ["F", "G", "H"].forEach((col, i) => {
-    reportSh
-      .getRange(sumRow, 6 + i)
-      .setFormula(`=SUM(${col}${START}:${col}${sumRow - 1})`);
+  Object.entries(carMap).forEach(([carNo, rows]) => {
+    const carSh = ss.getSheetByName(carNo);
+    if (!carSh) {
+      Logger.log(`시트 없음: ${carNo}`);
+      return;
+    }
+
+    rows.forEach((r, idx) => {
+      const d = new Date(r[COL.사용일자]);
+      const 요일 = DAYS[d.getDay()];
+      const dateStr = `${d.getMonth() + 1}/${d.getDate()}(${요일})`;
+      const row = DATA_START_ROW + idx;
+
+      carSh.getRange(row, 1).setValue(dateStr);
+      carSh.getRange(row, 6).setValue(r[COL.부서]);
+      carSh.getRange(row, 10).setValue(r[COL.성명]);
+
+      if (row === DATA_START_ROW) {
+        carSh.getRange(row, 14).setValue(r[COL.주행전]);
+      } else {
+        carSh.getRange(row, 14).setFormula(`=T${row - 1}`);
+      }
+
+      carSh.getRange(row, 20).setValue(r[COL.주행후]);
+      carSh.getRange(row, 26).setFormula(`=T${row}-N${row}`);
+      carSh.getRange(row, 32).setValue(r[COL.출퇴근]);
+      carSh.getRange(row, 38).setValue(r[COL.일반업무]);
+      carSh.getRange(row, 44).setValue(r[COL.비고] || "");
+    });
+
+    Logger.log(`${carNo}: ${rows.length}건 동기화 완료`);
   });
-  SpreadsheetApp.flush();
 }
 
-// ── 헬퍼 ──────────────────────────────────────────────────
 function getMasterValue(masterSh, carNo, field) {
   const FIELD_COL = { 차종: 1, 법인명: 3, 사업자번호: 4 };
   const row = masterSh
@@ -354,14 +317,16 @@ function getMasterRow(masterSh, carNo) {
   );
 }
 
-// ── 스크립트 속성 초기 설정 ──────────────────────────────
-// config.json 수정 후 clasp push → 이 함수 실행 → 재배포
 function setupProperties() {
   const config = JSON.parse(
     HtmlService.createHtmlOutputFromFile("config").getContent(),
   );
   const props = PropertiesService.getScriptProperties();
 
+  props.setProperty(
+    "SPREADSHEET_ID",
+    "1sgzKrRD47t8429NpSOiaRJHeRCIBPf98TsqIjlGYU9A",
+  );
   props.setProperty("STAFF_JSON", JSON.stringify(config.staff));
   props.setProperty("FIXED_USER_JSON", JSON.stringify(config.fixedUser));
   props.setProperty(
