@@ -31,33 +31,28 @@ const COL = {
 // ── GET: HTML 서빙 + JSON API ──────────────────────────────
 function doGet(e) {
   try {
-    const action = e && e.parameter ? e.parameter.action : null;
-
-    // JSON API — 이전 계기판 조회
-    if (action === "getPrevOdo") {
-      const carNo = e.parameter.car;
-      if (!carNo) throw new Error("차량번호 없음");
-      const result = getPrevOdoData(carNo);
-      return ContentService.createTextOutput(
-        JSON.stringify(result),
-      ).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    // HTML 서빙 — 설정값을 템플릿으로 주입
     const props = PropertiesService.getScriptProperties();
-
-    // 모든 데이터를 하나의 객체로 묶음
     const config = {
       staff: JSON.parse(props.getProperty("STAFF_JSON") || "[]"),
       fixedUser: JSON.parse(props.getProperty("FIXED_USER_JSON") || "{}"),
       businessTripCars: JSON.parse(
         props.getProperty("BUSINESS_TRIP_CARS_JSON") || "[]",
       ),
+      clients: JSON.parse(props.getProperty("CLIENTS_JSON") || "[]"),
     };
 
+    // URL 파라미터에서 차량번호 추출
+    const carNo = e && e.parameter && e.parameter.car ? e.parameter.car : "";
+
+    // 직전 계기판 데이터를 서버에서 미리 조회
+    const prevOdoData = carNo
+      ? getPrevOdoData(carNo)
+      : { prevOdo: null, prevDate: null, carName: "" };
+
     const tpl = HtmlService.createTemplateFromFile("ppap_form.html");
-    // JSON 문자열로 변환해서 하나만 전달
     tpl.configJson = JSON.stringify(config);
+    tpl.carNo = carNo;
+    tpl.prevOdoJson = JSON.stringify(prevOdoData);
 
     return tpl
       .evaluate()
