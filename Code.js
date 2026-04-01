@@ -125,6 +125,8 @@ function saveRecord(payload) {
   const 출퇴근 = 사용구분 === "출퇴근용" ? 주행거리 : 0;
   const 일반업무 = 사용구분 === "일반업무용" ? 주행거리 : 0;
   const 차종 = getMasterValue(masterSh, 차량번호, "차종") || "";
+  const 사용일자 = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
+  const 요일 = DAYS[now.getDay()];
 
   const flags = detectAnomalies({
     rawSh,
@@ -137,12 +139,20 @@ function saveRecord(payload) {
   });
 
   const id = Utilities.getUuid();
+  const flagStr = flags.length > 0 ? flags.join(" | ") : "정상";
+  const 타임스탬프 = Utilities.formatDate(
+    now,
+    "Asia/Seoul",
+    "yyyy-MM-dd HH:mm:ss",
+  );
+
+  // ① RAW 시트 저장
   const newRow = new Array(16).fill("");
   newRow[COL.ID] = id;
   newRow[COL.차량번호] = 차량번호;
   newRow[COL.차종] = 차종;
-  newRow[COL.사용일자] = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
-  newRow[COL.요일] = DAYS[now.getDay()];
+  newRow[COL.사용일자] = 사용일자;
+  newRow[COL.요일] = 요일;
   newRow[COL.부서] = payload.dept;
   newRow[COL.성명] = payload.name;
   newRow[COL.주행전] = 주행전;
@@ -152,14 +162,37 @@ function saveRecord(payload) {
   newRow[COL.출퇴근] = 출퇴근;
   newRow[COL.일반업무] = 일반업무;
   newRow[COL.비고] = payload.note || "";
-  newRow[COL.플래그] = flags.length > 0 ? flags.join(" | ") : "정상";
-  newRow[COL.타임스탬프] = Utilities.formatDate(
-    now,
-    "Asia/Seoul",
-    "yyyy-MM-dd HH:mm:ss",
-  );
-
+  newRow[COL.플래그] = flagStr;
+  newRow[COL.타임스탬프] = 타임스탬프;
   rawSh.appendRow(newRow);
+
+  // ② 차량별 탭 저장
+  const carSh = ss.getSheetByName(차량번호);
+  if (carSh) {
+    const dateStr = `${now.getMonth() + 1}/${now.getDate()}(${요일})`;
+    const DATA_START_ROW = 15;
+
+    // 15행부터 B열 기준으로 마지막 데이터 행 탐색
+    let lastDataRow = DATA_START_ROW - 1;
+    const lastRow = carSh.getLastRow();
+    for (let r = lastRow; r >= DATA_START_ROW; r--) {
+      if (carSh.getRange(r, 2).getValue() !== "") {
+        lastDataRow = r;
+        break;
+      }
+    }
+
+    const insertRow = lastDataRow + 1;
+    carSh.getRange(insertRow, 2).setValue(dateStr);
+    carSh.getRange(insertRow, 3).setValue(payload.dept);
+    carSh.getRange(insertRow, 4).setValue(payload.name);
+    carSh.getRange(insertRow, 5).setValue(주행전);
+    carSh.getRange(insertRow, 6).setValue(주행후);
+    carSh.getRange(insertRow, 7).setValue(주행거리);
+    carSh.getRange(insertRow, 8).setValue(출퇴근);
+    carSh.getRange(insertRow, 9).setValue(일반업무);
+    carSh.getRange(insertRow, 10).setValue(payload.note || "");
+  }
 
   return { success: true, id, mileage: 주행거리, flags };
 }
