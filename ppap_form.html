@@ -16,7 +16,7 @@
         --border: #e5e7eb;
         --text-main: #111827;
         --text-sub: #6b7280;
-        --accent: #2563eb; /* 신뢰감 있는 블루 */
+        --accent: #2563eb;
         --danger: #ef4444;
         --radius: 16px;
       }
@@ -30,10 +30,9 @@
         background: var(--bg);
         color: var(--text-main);
         margin: 0;
-        padding-bottom: 120px; /* 버튼 공간 */
+        padding-bottom: 120px;
       }
 
-      /* 상단 헤더: 앱 느낌 강조 */
       .header {
         background: #ffffff;
         padding: 24px 20px;
@@ -58,7 +57,6 @@
         margin-top: 4px;
       }
 
-      /* 대시보드 형태의 직전 기록 카드 */
       .prev-card {
         margin: 16px;
         background: var(--accent);
@@ -82,7 +80,18 @@
         margin-top: 8px;
       }
 
-      /* 입력 폼 카드 스타일 */
+      /* 최초 등록 안내 배너 */
+      .first-record-banner {
+        margin: 0 16px 12px;
+        padding: 14px 16px;
+        background: #fffbeb;
+        border: 1px solid #fde68a;
+        border-radius: 12px;
+        font-size: 13px;
+        color: #92400e;
+        line-height: 1.6;
+      }
+
       .form-container {
         padding: 0 16px;
       }
@@ -97,6 +106,14 @@
       .field-card.active-focus {
         border-color: var(--accent);
       }
+
+      /* 비활성화된 카드 스타일 */
+      .field-card.disabled {
+        opacity: 0.4;
+        pointer-events: none;
+        user-select: none;
+      }
+
       .field-label {
         font-size: 13px;
         font-weight: 600;
@@ -110,7 +127,6 @@
         color: var(--danger);
       }
 
-      /* 입력 요소 최적화 */
       select,
       input {
         width: 100%;
@@ -133,7 +149,6 @@
         font-size: 16px;
       }
 
-      /* 토글 버튼 그룹 */
       .toggle-group {
         display: flex;
         gap: 8px;
@@ -155,7 +170,6 @@
         color: var(--accent);
       }
 
-      /* 하단 고정 버튼 */
       .bottom-actions {
         position: fixed;
         bottom: 0;
@@ -184,7 +198,6 @@
         box-shadow: none;
       }
 
-      /* 로딩 오버레이 */
       .loading-overlay {
         display: none;
         position: fixed;
@@ -215,7 +228,6 @@
         }
       }
 
-      /* 에러/결과 메시지 */
       .err-text {
         color: var(--danger);
         font-size: 12px;
@@ -258,6 +270,17 @@
       <div class="prev-sub" id="prevOdoSub">최근 기록을 불러오는 중입니다.</div>
     </div>
 
+    <!-- 최초 등록 안내 배너 (기본 숨김, isFirst일 때만 표시) -->
+    <div
+      class="first-record-banner"
+      id="firstRecordBanner"
+      style="display: none"
+    >
+      <b>📋 최초 계기판 등록</b><br />
+      이 차량의 첫 번째 기록입니다.<br />
+      현재 계기판 수치만 입력하면 됩니다.
+    </div>
+
     <div class="form-container" id="mainForm">
       <div class="field-card" id="fieldNameCard">
         <div class="field-label"><span class="req">*</span>운전자</div>
@@ -267,14 +290,14 @@
         <div class="err-text">운전자를 선택해야 합니다.</div>
       </div>
 
-      <div class="field-card">
+      <div class="field-card" id="fieldDeptCard">
         <div class="field-label">소속 부서</div>
         <div id="deptDisplay" style="font-weight: 600; color: var(--accent)">
           운전자 선택 시 자동 입력
         </div>
       </div>
 
-      <div class="field-card">
+      <div class="field-card" id="fieldTypeCard">
         <div class="field-label"><span class="req">*</span>사용 구분</div>
         <div class="toggle-group">
           <button
@@ -322,8 +345,6 @@
         <div id="noteCombo" style="display: none">
           <select id="noteSelect" style="margin-bottom: 10px">
             <option value="" selected>거래처를 선택하세요</option>
-            <option>하이닉스(이천)</option>
-            <option>하이닉스(청주)</option>
             <option value="__direct__">직접 입력하기</option>
           </select>
           <input
@@ -390,29 +411,30 @@
       const STAFF = _CONFIG.staff;
       const FIXED_USER = _CONFIG.fixedUser;
       const BUSINESS_TRIP_CARS = _CONFIG.businessTripCars;
-      const CLIENTS = _CONFIG.clients || []; // 스크립트 속성에서 가져온 거래처 목록
+      const CLIENTS = _CONFIG.clients || [];
 
       let carNo = document.getElementById("car-raw").textContent.trim();
       let prevOdo = null;
       let selectedType = "일반업무용";
       let isBusinessTrip = false;
+      let isFirst = false; // 최초 기록 여부
 
-      // ── 2. 초기화 로직 (페이지 로드 시 실행) ──────────────────────────
+      // ── 2. 초기화 로직 ──────────────────────────────────────────────
       window.onload = function () {
-        // 날짜 표시 (yyyy. MM. dd. 포맷)
+        // 날짜 표시
         const now = new Date();
         document.getElementById("headerDate").textContent =
           `${now.getFullYear()}. ${now.getMonth() + 1}. ${now.getDate()}. (${["일", "월", "화", "수", "목", "금", "토"][now.getDay()]})`;
         document.getElementById("headerCar").textContent =
           carNo || "차량 정보 없음";
 
-        // 계기판 데이터 주입 및 기본값 세팅
+        // 직전 계기판 데이터 주입
         const pData = JSON.parse(
           document.getElementById("prevodo-raw").textContent,
         );
-        const odoInput = document.getElementById("currentOdo");
 
         if (pData && pData.prevOdo) {
+          // ── 일반 모드: 직전 기록 있음 ──
           prevOdo = Number(pData.prevOdo);
           document.getElementById("prevOdoDisplay").textContent =
             prevOdo.toLocaleString() + " km";
@@ -420,26 +442,39 @@
             ? "최근 기록: " + pData.prevDate
             : "최근 기록 없음";
 
-          // [개선 2-1] 기본값을 직전 계기판 값으로 세팅하여 입력 편의성 제공
-          odoInput.value = prevOdo;
+          // 기본값을 직전 계기판 값으로 세팅
+          document.getElementById("currentOdo").value = prevOdo;
         } else {
+          // ── 최초 기록 모드: RAW 데이터에 이 차량 주행후 기록 없음 ──
+          isFirst = true;
+
           document.getElementById("prevOdoDisplay").textContent = "최초 등록";
           document.getElementById("prevOdoSub").textContent =
             "새 차량이거나 기록이 없습니다.";
+
+          // 안내 배너 표시
+          document.getElementById("firstRecordBanner").style.display = "block";
+
+          // 버튼 텍스트 변경
+          document.getElementById("submitBtn").textContent = "초기값 등록하기";
+
+          // 계기판 입력을 제외한 나머지 카드 전부 비활성화
+          document.getElementById("fieldNameCard").classList.add("disabled");
+          document.getElementById("fieldDeptCard").classList.add("disabled");
+          document.getElementById("fieldTypeCard").classList.add("disabled");
+          document.getElementById("fieldNoteCard").classList.add("disabled");
         }
 
-        // 공용/고정 차량 UI 분기 및 거래처 목록 로드
+        // 공용/고정 차량 UI 분기
         isBusinessTrip = BUSINESS_TRIP_CARS.includes(carNo);
         const fixed = FIXED_USER[carNo];
         const sel = document.getElementById("selName");
 
         if (fixed) {
-          // 고정 차량인 경우 운전자 선택창 숨기고 자동 표시
           document.getElementById("fieldNameCard").style.display = "none";
           document.getElementById("deptDisplay").textContent =
             fixed.dept + " " + fixed.name;
         } else {
-          // 공용 차량인 경우 직원 목록 채우기
           STAFF.forEach((p) => {
             let opt = document.createElement("option");
             opt.value = p.name;
@@ -448,7 +483,7 @@
           });
         }
 
-        // [개선] 방문 거래처 목록을 스크립트 속성(CLIENTS)에서 동적으로 생성
+        // 방문 거래처 목록 (출장용 차량)
         if (isBusinessTrip) {
           document.getElementById("noteLabel").innerHTML =
             '방문 거래처 <span class="req">*</span>';
@@ -480,14 +515,12 @@
         selectType("일반업무용");
       };
 
-      // ── 3. 이벤트 핸들러 및 유효성 검사 함수 ───────────────────────
+      // ── 3. 이벤트 핸들러 및 유효성 검사 ────────────────────────────
 
-      // [개선 1] 운전자 선택 시 소속 부서 자동 표시 함수
       function updateDept() {
         const sel = document.getElementById("selName");
         const deptDisplay = document.getElementById("deptDisplay");
-        const selectedName = sel.value;
-        const staffInfo = STAFF.find((s) => s.name === selectedName);
+        const staffInfo = STAFF.find((s) => s.name === sel.value);
 
         if (staffInfo) {
           deptDisplay.textContent = staffInfo.dept;
@@ -497,7 +530,6 @@
         }
       }
 
-      // [개선 2-2] 계기판 입력 유효성 검사 (오입력 방지 로직 포함)
       function validateOdo() {
         const val = Number(document.getElementById("currentOdo").value);
         const card = document.getElementById("fieldOdoCard");
@@ -508,12 +540,18 @@
           return;
         }
 
-        if (prevOdo && val < prevOdo) {
-          err.textContent = `직전 기록(${prevOdo}km)보다 낮습니다.`;
+        // 최초 기록 모드: 값만 있으면 바로 통과
+        if (isFirst) {
+          card.classList.remove("error");
+          setBtnState(true);
+          return;
+        }
+
+        if (val < prevOdo) {
+          err.textContent = `직전 기록(${prevOdo.toLocaleString()}km)보다 낮습니다.`;
           card.classList.add("error");
           setBtnState(false, "계기판 확인 필요");
-        } else if (prevOdo && val === prevOdo) {
-          // 값이 변하지 않았을 경우 저장 방지
+        } else if (val === prevOdo) {
           err.textContent = `직전 기록과 같습니다. 주행 후 값을 입력해 주세요.`;
           card.classList.add("error");
           setBtnState(false, "주행 거리 확인");
@@ -536,11 +574,57 @@
       function setBtnState(enabled, text) {
         const btn = document.getElementById("submitBtn");
         btn.disabled = !enabled;
-        btn.textContent = text || "기록 저장하기";
+        if (!isFirst) {
+          btn.textContent = text || "기록 저장하기";
+        }
       }
 
-      // ── 4. 데이터 서버 전송 (Server Communication) ───────────────────
+      // ── 4. 데이터 서버 전송 ─────────────────────────────────────────
       function submitForm() {
+        const odoVal = Number(document.getElementById("currentOdo").value);
+
+        if (!odoVal) {
+          alert("계기판 수치를 입력해주세요.");
+          return;
+        }
+
+        // 최초 기록 모드: 계기판 값만 전송, 나머지는 빈값
+        if (isFirst) {
+          document.getElementById("overlay").classList.add("show");
+          google.script.run
+            .withSuccessHandler((data) => {
+              document.getElementById("overlay").classList.remove("show");
+              if (data.success) {
+                document.getElementById("mainForm").style.display = "none";
+                document.querySelector(".prev-card").style.display = "none";
+                document.querySelector(".header").style.display = "none";
+                document.querySelector(".bottom-actions").style.display =
+                  "none";
+                document.getElementById("firstRecordBanner").style.display =
+                  "none";
+
+                document.getElementById("resultDetail").innerHTML = `
+                  <b>차량:</b> ${carNo}<br>
+                  <b>계기판 초기값:</b> ${odoVal.toLocaleString()} km
+                `;
+                document.getElementById("resultArea").style.display = "block";
+              } else {
+                alert("저장 실패: " + data.message);
+              }
+            })
+            .saveRecord({
+              carNo,
+              name: "",
+              dept: "",
+              useType: "",
+              currentOdo: odoVal,
+              prevOdo: null, // null이면 백엔드에서 isFirst로 처리
+              note: "",
+            });
+          return;
+        }
+
+        // 일반 기록 모드
         const fixed = FIXED_USER[carNo];
         const name = fixed
           ? fixed.name
@@ -548,9 +632,7 @@
         const dept = fixed
           ? fixed.dept
           : STAFF.find((s) => s.name === name)?.dept;
-        const odoVal = Number(document.getElementById("currentOdo").value);
 
-        // 비고(Note) 처리 로직
         let note = "";
         if (isBusinessTrip) {
           const selVal = document.getElementById("noteSelect").value;
@@ -566,8 +648,8 @@
           note = document.getElementById("noteText").value;
         }
 
-        if (!name || !odoVal) {
-          alert("모든 항목을 입력해주세요.");
+        if (!name) {
+          alert("운전자를 선택해주세요.");
           return;
         }
 
@@ -583,11 +665,11 @@
               document.querySelector(".bottom-actions").style.display = "none";
 
               document.getElementById("resultDetail").innerHTML = `
-            <b>차량:</b> ${carNo}<br>
-            <b>운전자:</b> ${dept} ${name}<br>
-            <b>주행후:</b> ${odoVal.toLocaleString()} km<br>
-            <b>주행거리:</b> ${data.mileage} km
-          `;
+                <b>차량:</b> ${carNo}<br>
+                <b>운전자:</b> ${dept} ${name}<br>
+                <b>주행후:</b> ${odoVal.toLocaleString()} km<br>
+                <b>주행거리:</b> ${data.mileage} km
+              `;
               document.getElementById("resultArea").style.display = "block";
             } else {
               alert("저장 실패: " + data.message);
@@ -600,7 +682,7 @@
             useType: selectedType,
             currentOdo: odoVal,
             prevOdo,
-            note: note,
+            note,
           });
       }
     </script>
