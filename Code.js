@@ -96,6 +96,12 @@ function doPost(e) {
         JSON.stringify(result),
       ).setMimeType(ContentService.MimeType.JSON);
     }
+    if (payload.action === "update") {
+      const result = updateRecord(payload);
+      return ContentService.createTextOutput(
+        JSON.stringify(result),
+      ).setMimeType(ContentService.MimeType.JSON);
+    }
     throw new Error("알 수 없는 action");
   } catch (err) {
     return ContentService.createTextOutput(
@@ -150,20 +156,18 @@ function getPrevOdoData(carNo) {
 }
 
 // ── READ: 이상 감지 — 차량 탭에서 직접 읽기 ──────────────────────────
-function detectAnomalies({ carSh, 주행거리,  prevOdo }) {
+function detectAnomalies({ carSh, 주행거리, prevOdo }) {
   const flags = [];
 
   if (주행거리 < 0) {
     flags.push(`역주행감지(${주행거리}km)`);
     return flags;
   }
-  if (prevOdo !== null && prevOdo !== undefined) {
-    // prevOdo와 주행전이 일치하는지는 프론트에서 이미 검증하므로 여기선 생략
-  }
 
   return flags;
 }
 
+// ── WRITE: 신규 기록 저장 ─────────────────────────────────────────────
 function saveRecord(payload) {
   const ss = getSpreadsheet();
   const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
@@ -223,6 +227,7 @@ function saveRecord(payload) {
   }
 
   // ── ② WRITE: 차량 탭 저장 ─────────────────────────────────
+  let carRowIndex = -1;
   if (carSh) {
     const dateStr = `${now.getMonth() + 1}/${now.getDate()}(${요일})`;
 
@@ -230,6 +235,8 @@ function saveRecord(payload) {
     const insertRow = lastDataRow === -1
       ? CONFIG.DATA_START_ROW
       : lastDataRow + 1;
+
+    carRowIndex = insertRow;
 
     if (isFirst) {
       // 최초 등록: 날짜 + T열(주행후)만 기록
@@ -249,7 +256,84 @@ function saveRecord(payload) {
     }
   }
 
-  return { success: true, id, mileage: isFirst ? 0 : 주행거리, flags };
+  return { success: true, id, mileage: isFirst ? 0 : 주행거리, flags, carRowIndex };
+}
+
+// ── WRITE: 기존 기록 수정 ─────────────────────────────────────────────
+//
+// 처리 순서:
+// 1. RAW 시트에 "수정" 플래그가 붙은 새 행 추가
+//    (원본 ID를 originalId 컬럼에 기록하여 이력 추적 가능)
+// 2. 차량 탭의 해당 행(carRowIndex)을 새 데이터로 덮어씀
+//    - 수식(주행전, 주행거리)은 행 번호 기준으로 재설정
+//
+function updateRecord(payload) {
+  const ss = getSpreadsheet();
+  const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
+
+  const now = new Date();
+  const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+  const 차량번호 = payload.carNo;
+  const 주행후 = Number(payload.currentOdo);
+  const 사용구분 = payload.useType;
+  const 차종 = getMasterValue(masterSh, 차량번호, "차종") || "";
+  const 사용일자 = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
+  const 요일 = DAYS[now.getDay()];
+  const carRowIndex = payload.carRowIndex; // 차량 탭에서 교체할 행 번호
+
+  const 주행전 = Number(payload.prevOdo);
+  const 주행거리 = 주행후 - 주행전;
+  const 출퇴근 = 사용구분 === "출퇴근용" ? 주행거리 : 0;
+  const 일반업무 = 사용구분 === "일반업무용" ? 주행거리 : 0;
+
+  const carSh = ss.getSheetByName(차량번호);
+  const flags = detectAnomalies({ carSh, 주행거리, prevOdo: 주행전 });
+
+  const newId = Utilities.getUuid();
+  // 수정 기록임을 명시 + 원본 ID 포함
+  const flagStr = (flags.length > 0 ? flags.join(" | ") + " | " : "") +
+                  `수정됨(원본:${payload.originalId})`;
+  const 타임스탬프 = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd HH:mm:ss");
+
+  // ── ① RAW 시트: 수정 이력 행 추가 ────────────────────────
+  const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
+  if (rawSh) {
+    const newRow = new Array(16).fill("");
+    newRow[COL.ID] = newId;
+    newRow[COL.차량번호] = 차량번호;
+    newRow[COL.차종] = 차종;
+    newRow[COL.사용일자] = 사용일자;
+    newRow[COL.요일] = 요일;
+    newRow[COL.부서] = payload.dept;
+    newRow[COL.성명] = payload.name;
+    newRow[COL.주행전] = 주행전;
+    newRow[COL.주행후] = 주행후;
+    newRow[COL.주행거리] = 주행거리;
+    newRow[COL.사용구분] = 사용구분;
+    newRow[COL.출퇴근] = 출퇴근;
+    newRow[COL.일반업무] = 일반업무;
+    newRow[COL.비고] = payload.note || "";
+    newRow[COL.플래그] = flagStr;
+    newRow[COL.타임스탬프] = 타임스탬프;
+    rawSh.appendRow(newRow);
+  }
+
+  // ── ② 차량 탭: 해당 행 덮어쓰기 ──────────────────────────
+  if (carSh && carRowIndex > 0) {
+    // 날짜는 원본 날짜를 유지하기 위해 기존 값 그대로 두고
+    // 나머지 데이터 컬럼만 교체합니다.
+    carSh.getRange(carRowIndex, CAR_COL.부서).setValue(payload.dept);
+    carSh.getRange(carRowIndex, CAR_COL.성명).setValue(payload.name);
+    carSh.getRange(carRowIndex, CAR_COL.주행후).setValue(주행후);
+    // 주행전 수식은 이전 행(carRowIndex - 1) T열 참조
+    carSh.getRange(carRowIndex, CAR_COL.주행전).setFormula(`=T${carRowIndex - 1}`);
+    carSh.getRange(carRowIndex, CAR_COL.주행거리).setFormula(`=T${carRowIndex}-N${carRowIndex}`);
+    carSh.getRange(carRowIndex, CAR_COL.출퇴근).setValue(출퇴근);
+    carSh.getRange(carRowIndex, CAR_COL.일반업무).setValue(일반업무);
+    carSh.getRange(carRowIndex, CAR_COL.비고).setValue(payload.note || "");
+  }
+
+  return { success: true, newId, mileage: 주행거리, flags };
 }
 
 // ── RAW → 차량 탭 전체 재동기화 (복구용) ─────────────────────────────

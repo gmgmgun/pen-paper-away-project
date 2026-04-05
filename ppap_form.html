@@ -11,10 +11,6 @@
       @import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap");
 
       :root {
-        /* ━━ 폰트 크기 조절 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-           이 값 하나만 바꾸면 전체 글자 크기가 비례해서 변합니다.
-           기본값: 16px | 크게: 18px | 더 크게: 20px
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
         --font-base: 20px;
 
         --bg: #f0f2f5;
@@ -27,6 +23,8 @@
         --accent-mid: #bfdbfe;
         --danger: #dc2626;
         --success: #16a34a;
+        --warning: #d97706;
+        --warning-light: #fffbeb;
         --radius: 20px;
         --radius-sm: 14px;
         --shadow: 0 2px 12px rgba(0,0,0,0.07);
@@ -35,7 +33,6 @@
       * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
 
       html {
-        /* ← rem의 기준이 여기서 결정됩니다. --font-base 변경 시 모든 rem이 연동됩니다. */
         font-size: var(--font-base);
         height: 100%;
         overflow-y: auto;
@@ -57,6 +54,10 @@
         position: sticky;
         top: 0;
         z-index: 10;
+      }
+      /* 수정 모드 헤더 — 주황색 */
+      .header.edit-mode {
+        background: var(--warning);
       }
       .header-top {
         display: flex;
@@ -89,6 +90,21 @@
         color: rgba(255,255,255,0.65);
         margin-top: 2px;
       }
+
+      /* ── 수정 모드 배너 ── */
+      .edit-mode-banner {
+        margin: 16px 16px 0;
+        padding: 16px 18px;
+        background: var(--warning-light);
+        border: 1.5px solid #fcd34d;
+        border-radius: var(--radius-sm);
+        font-size: 0.875rem;
+        color: #78350f;
+        line-height: 1.6;
+        display: none;
+      }
+      .edit-mode-banner.show { display: block; }
+      .edit-mode-banner b { display: block; margin-bottom: 4px; font-size: 0.9375rem; }
 
       /* ── 직전 계기판 카드 ── */
       .prev-card {
@@ -177,9 +193,7 @@
         pointer-events: none;
         user-select: none;
       }
-      /* 완료 — 초록 테두리 */
       .field-card.step-done  { border-color: #86efac; }
-      /* 미입력 — 빨간 테두리 */
       .field-card.step-pending { border-color: #fca5a5; }
 
       /* ── 카드 헤더 ── */
@@ -205,7 +219,6 @@
       .field-card.step-done .field-label    { color: var(--success); }
       .field-card.step-pending .field-label { color: var(--danger); }
 
-      /* 상태 아이콘 */
       .status-icon { font-size: 0.875rem; flex-shrink: 0; font-weight: 800; }
       .field-card.step-done    .status-icon { color: var(--success); }
       .field-card.step-pending .status-icon { color: var(--danger); }
@@ -312,7 +325,6 @@
         position: sticky;
         bottom: 0;
       }
-      /* 상단 그라데이션 마스크 효과 */
       .bottom-actions::before {
         content: '';
         position: absolute;
@@ -336,6 +348,11 @@
         letter-spacing: -0.3px;
         transition: opacity 0.15s, transform 0.1s;
         cursor: pointer;
+      }
+      /* 수정 모드 저장 버튼 — 주황색 */
+      .submit-btn.edit-mode {
+        background: var(--warning);
+        box-shadow: 0 4px 20px rgba(217, 119, 6, 0.35);
       }
       .submit-btn:active { transform: scale(0.98); }
       .submit-btn:disabled {
@@ -398,6 +415,9 @@
         font-size: 40px;
         margin: 0 auto 24px;
       }
+      /* 수정 완료 시 주황 배경 */
+      .result-emoji.edit { background: #fef3c7; }
+
       .result-title {
         font-size: 1.625rem;
         font-weight: 800;
@@ -425,6 +445,38 @@
       .result-row:last-child { border-bottom: none; padding-bottom: 0; }
       .result-row .label { font-size: 0.8125rem; font-weight: 600; color: var(--text-sub); min-width: 70px; }
       .result-row .value { font-size: 1rem; font-weight: 700; color: var(--text-main); }
+      .result-row .value.strike {
+        text-decoration: line-through;
+        color: var(--text-sub);
+        font-weight: 400;
+        font-size: 0.875rem;
+      }
+      .result-row .value.new {
+        color: var(--warning);
+      }
+
+      /* ── 결과 화면 버튼 그룹 ── */
+      .result-btn-group {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: 100%;
+      }
+      .result-edit-btn {
+        background: var(--warning);
+        color: #fff;
+        border: none;
+        font-weight: 800;
+        font-size: 1rem;
+        font-family: inherit;
+        padding: 18px 32px;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        width: 100%;
+        box-shadow: 0 4px 16px rgba(217, 119, 6, 0.3);
+        transition: opacity 0.15s, transform 0.1s;
+      }
+      .result-edit-btn:active { transform: scale(0.98); }
       .result-reload-btn {
         background: none;
         border: 2px solid var(--accent);
@@ -452,22 +504,28 @@
 
     <div class="loading-overlay" id="overlay">
       <div class="spinner"></div>
-      <div class="loading-text">저장 중...</div>
+      <div class="loading-text" id="overlayText">저장 중...</div>
     </div>
 
     <!-- 메인 콘텐츠 -->
     <div id="mainContent">
-      <div class="header">
+      <div class="header" id="mainHeader">
         <div class="header-top">
           <span class="header-car-badge" id="headerCar">차량 로딩중</span>
           <span class="header-date" id="headerDate"></span>
         </div>
-        <div class="header-title">운행 일지</div>
-        <div class="header-subtitle">주행 정보를 입력해 주세요</div>
+        <div class="header-title" id="headerTitle">운행 일지</div>
+        <div class="header-subtitle" id="headerSubtitle">주행 정보를 입력해 주세요</div>
+      </div>
+
+      <!-- 수정 모드 배너 -->
+      <div class="edit-mode-banner" id="editModeBanner">
+        <b>✏️ 수정 모드</b>
+        방금 저장한 기록을 수정합니다.<br>변경할 항목만 수정 후 저장해 주세요.
       </div>
 
       <!-- 직전 계기판 -->
-      <div class="prev-card">
+      <div class="prev-card" id="prevCard">
         <div class="prev-icon">🚗</div>
         <div class="prev-info">
           <div class="prev-label">직전 계기판</div>
@@ -571,11 +629,14 @@
     <!-- 결과 화면 -->
     <div id="resultArea">
       <div class="result-inner">
-        <div class="result-emoji">✅</div>
-        <div class="result-title">저장 완료!</div>
-        <div class="result-desc">운행 기록이 성공적으로 전송되었습니다.</div>
+        <div class="result-emoji" id="resultEmoji">✅</div>
+        <div class="result-title" id="resultTitle">저장 완료!</div>
+        <div class="result-desc" id="resultDesc">운행 기록이 성공적으로 전송되었습니다.</div>
         <div class="result-detail-card" id="resultDetail"></div>
-        <button class="result-reload-btn" onclick="location.reload()">새로 작성하기</button>
+        <div class="result-btn-group">
+          <button class="result-edit-btn" id="editBtn" onclick="enterEditMode()">✏️ 수정하기</button>
+          <button class="result-reload-btn" onclick="location.reload()">새로 작성하기</button>
+        </div>
       </div>
     </div>
 
@@ -592,6 +653,10 @@
       let selectedType = "일반업무용";
       let isBusinessTrip = false;
       let isFirst = false;
+
+      // 수정 모드 상태
+      let isEditMode = false;
+      let savedRecord = null; // { id, carNo, name, dept, useType, currentOdo, prevOdo, note, carRowIndex }
 
       // ── 2. 상태 헬퍼 ─────────────────────────────────────────────────
       function setCardDone(cardId, iconId) {
@@ -702,12 +767,15 @@
           return;
         }
 
-        if (val < prevOdo) {
-          err.textContent = `직전 기록(${prevOdo.toLocaleString()}km)보다 낮습니다.`;
+        // 수정 모드: prevOdo는 원본 기록의 prevOdo를 기준으로 검증
+        const baseOdo = isEditMode ? savedRecord.prevOdo : prevOdo;
+
+        if (val < baseOdo) {
+          err.textContent = `직전 기록(${baseOdo.toLocaleString()}km)보다 낮습니다.`;
           document.getElementById("fieldOdoCard").classList.add("error");
           setCardPending("fieldOdoCard", "iconOdo");
           setBtnState(false, "계기판 확인 필요");
-        } else if (val === prevOdo) {
+        } else if (val === baseOdo) {
           err.textContent = `직전 기록과 같습니다. 주행 후 값을 입력해 주세요.`;
           document.getElementById("fieldOdoCard").classList.add("error");
           setCardPending("fieldOdoCard", "iconOdo");
@@ -752,25 +820,197 @@
       function setBtnState(enabled, text) {
         const btn = document.getElementById("submitBtn");
         btn.disabled = !enabled;
-        if (!isFirst) btn.textContent = text || "기록 저장하기";
+        if (!isFirst) {
+          btn.textContent = text || (isEditMode ? "수정 저장하기" : "기록 저장하기");
+        }
       }
 
-      // ── 5. 서버 전송 ──────────────────────────────────────────────────
+      // ── 5. 수정 모드 진입 ────────────────────────────────────────────
+      function enterEditMode() {
+        if (!savedRecord) return;
+
+        isEditMode = true;
+
+        // 결과 화면 숨기고 폼 다시 표시
+        document.getElementById("resultArea").classList.remove("show");
+        document.getElementById("mainContent").style.display = "block";
+
+        // UI 수정 모드 표시
+        document.getElementById("mainHeader").classList.add("edit-mode");
+        document.getElementById("headerTitle").textContent = "운행 일지 수정";
+        document.getElementById("headerSubtitle").textContent = "저장된 기록을 수정합니다";
+        document.getElementById("editModeBanner").classList.add("show");
+
+        // 제출 버튼 스타일
+        const btn = document.getElementById("submitBtn");
+        btn.classList.add("edit-mode");
+        btn.textContent = "수정 저장하기";
+        btn.disabled = false;
+
+        // 직전 계기판 카드: 수정 모드에서는 원본 prevOdo 기준으로 표시
+        if (savedRecord.prevOdo !== null) {
+          document.getElementById("prevOdoDisplay").textContent = savedRecord.prevOdo.toLocaleString() + " km";
+          document.getElementById("prevOdoSub").textContent = "원본 기록 기준";
+        }
+
+        // 폼 필드에 기존 값 채우기
+        // 운전자
+        const fixed = FIXED_USER[carNo];
+        if (!fixed && savedRecord.name) {
+          const sel = document.getElementById("selName");
+          sel.value = savedRecord.name;
+          setCardDone("fieldNameCard", "iconName");
+        }
+
+        // 사용 구분
+        selectType(savedRecord.useType || "일반업무용");
+
+        // 계기판
+        document.getElementById("currentOdo").value = savedRecord.currentOdo;
+        setCardDone("fieldOdoCard", "iconOdo");
+
+        // 비고
+        if (isBusinessTrip) {
+          const clientsInList = CLIENTS.includes(savedRecord.note);
+          const noteSelect = document.getElementById("noteSelect");
+          if (clientsInList) {
+            noteSelect.value = savedRecord.note;
+          } else if (savedRecord.note) {
+            noteSelect.value = "__direct__";
+            document.getElementById("noteDirectInput").style.display = "block";
+            document.getElementById("noteDirectInput").value = savedRecord.note;
+          }
+          updateNoteStatus();
+        } else {
+          document.getElementById("noteText").value = savedRecord.note || "";
+          updateNoteStatus();
+        }
+
+        // 필드 활성화 보장 (최초 등록 모드였더라도)
+        ["fieldNameCard","fieldTypeCard","fieldOdoCard","fieldNoteCard"].forEach(id => {
+          const c = document.getElementById(id);
+          if (c) c.classList.remove("disabled");
+        });
+      }
+
+      // ── 6. 서버 전송 ──────────────────────────────────────────────────
       function submitForm() {
+
+        // ── 수정 모드 전송 ──
+        if (isEditMode) {
+          const odoVal = Number(document.getElementById("currentOdo").value);
+          if (!odoVal) { alert("계기판 수치를 입력해주세요."); return; }
+
+          const fixed = FIXED_USER[carNo];
+          const name = fixed ? fixed.name : document.getElementById("selName").value;
+          const dept = fixed ? fixed.dept : STAFF.find((s) => s.name === name)?.dept;
+
+          let note = "";
+          if (isBusinessTrip) {
+            const selVal = document.getElementById("noteSelect").value;
+            note = selVal === "__direct__"
+              ? document.getElementById("noteDirectInput").value : selVal;
+            if (!note) { alert("방문 거래처를 입력/선택해주세요."); return; }
+          } else {
+            note = document.getElementById("noteText").value;
+          }
+
+          if (!name) { alert("운전자를 선택해주세요."); return; }
+
+          document.getElementById("overlayText").textContent = "수정 중...";
+          document.getElementById("overlay").classList.add("show");
+
+          const updatePayload = {
+            originalId: savedRecord.id,
+            carRowIndex: savedRecord.carRowIndex,
+            carNo,
+            name,
+            dept,
+            useType: selectedType,
+            currentOdo: odoVal,
+            prevOdo: savedRecord.prevOdo,
+            note,
+          };
+
+          google.script.run
+            .withSuccessHandler((data) => {
+              document.getElementById("overlay").classList.remove("show");
+              if (data.success) {
+                // 저장 기록 갱신 (재수정 대비)
+                savedRecord = {
+                  ...savedRecord,
+                  id: data.newId,
+                  name,
+                  dept,
+                  useType: selectedType,
+                  currentOdo: odoVal,
+                  note,
+                };
+
+                const mileage = savedRecord.prevOdo !== null
+                  ? odoVal - savedRecord.prevOdo : 0;
+
+                document.getElementById("mainContent").style.display = "none";
+                document.getElementById("resultEmoji").textContent = "✏️";
+                document.getElementById("resultEmoji").classList.add("edit");
+                document.getElementById("resultTitle").textContent = "수정 완료!";
+                document.getElementById("resultDesc").textContent = "운행 기록이 성공적으로 수정되었습니다.";
+                document.getElementById("resultDetail").innerHTML = `
+                  <div class="result-row"><span class="label">차량</span><span class="value">${carNo}</span></div>
+                  <div class="result-row"><span class="label">운전자</span><span class="value">${dept} ${name}</span></div>
+                  <div class="result-row">
+                    <span class="label">주행 후</span>
+                    <span class="value">${odoVal.toLocaleString()} km</span>
+                  </div>
+                  <div class="result-row"><span class="label">주행 거리</span><span class="value">${mileage} km</span></div>
+                  ${note ? `<div class="result-row"><span class="label">비고</span><span class="value">${note}</span></div>` : ""}
+                `;
+                document.getElementById("resultArea").classList.add("show");
+                // 수정 완료 후 다시 수정 버튼 활성화
+                isEditMode = false;
+              } else {
+                alert("수정 실패: " + data.message);
+              }
+            })
+            .withFailureHandler((err) => {
+              document.getElementById("overlay").classList.remove("show");
+              alert("오류 발생: " + err.message);
+            })
+            .updateRecord(updatePayload);
+
+          return;
+        }
+
+        // ── 최초 등록 전송 ──
         const odoVal = Number(document.getElementById("currentOdo").value);
         if (!odoVal) { alert("계기판 수치를 입력해주세요."); return; }
 
         if (isFirst) {
+          document.getElementById("overlayText").textContent = "저장 중...";
           document.getElementById("overlay").classList.add("show");
           google.script.run
             .withSuccessHandler((data) => {
               document.getElementById("overlay").classList.remove("show");
               if (data.success) {
+                // 최초 등록은 수정 불가 (prevOdo 없으므로)
+                savedRecord = {
+                  id: data.id,
+                  carNo,
+                  name: "",
+                  dept: "",
+                  useType: "",
+                  currentOdo: odoVal,
+                  prevOdo: null,
+                  note: "",
+                  carRowIndex: data.carRowIndex,
+                };
                 document.getElementById("mainContent").style.display = "none";
                 document.getElementById("resultDetail").innerHTML = `
                   <div class="result-row"><span class="label">차량</span><span class="value">${carNo}</span></div>
                   <div class="result-row"><span class="label">초기 계기판</span><span class="value">${odoVal.toLocaleString()} km</span></div>
                 `;
+                // 최초 등록은 수정 버튼 숨김
+                document.getElementById("editBtn").style.display = "none";
                 document.getElementById("resultArea").classList.add("show");
               } else { alert("저장 실패: " + data.message); }
             })
@@ -778,6 +1018,7 @@
           return;
         }
 
+        // ── 일반 저장 전송 ──
         const fixed = FIXED_USER[carNo];
         const name = fixed ? fixed.name : document.getElementById("selName").value;
         const dept = fixed ? fixed.dept : STAFF.find((s) => s.name === name)?.dept;
@@ -794,12 +1035,26 @@
 
         if (!name) { alert("운전자를 선택해주세요."); return; }
 
+        document.getElementById("overlayText").textContent = "저장 중...";
         document.getElementById("overlay").classList.add("show");
 
         google.script.run
           .withSuccessHandler((data) => {
             document.getElementById("overlay").classList.remove("show");
             if (data.success) {
+              // 저장 성공 — 수정에 필요한 정보 보관
+              savedRecord = {
+                id: data.id,
+                carNo,
+                name,
+                dept,
+                useType: selectedType,
+                currentOdo: odoVal,
+                prevOdo,
+                note,
+                carRowIndex: data.carRowIndex,
+              };
+
               document.getElementById("mainContent").style.display = "none";
               document.getElementById("resultDetail").innerHTML = `
                 <div class="result-row"><span class="label">차량</span><span class="value">${carNo}</span></div>
@@ -809,6 +1064,10 @@
               `;
               document.getElementById("resultArea").classList.add("show");
             } else { alert("저장 실패: " + data.message); }
+          })
+          .withFailureHandler((err) => {
+            document.getElementById("overlay").classList.remove("show");
+            alert("오류 발생: " + err.message);
           })
           .saveRecord({ carNo, name, dept, useType: selectedType, currentOdo: odoVal, prevOdo, note });
       }
