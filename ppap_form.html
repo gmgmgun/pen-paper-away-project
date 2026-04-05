@@ -8,11 +8,12 @@
     />
     <title>운행 기록</title>
     <style>
-      @import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap");
+      /* [최적화] @import Google Fonts 제거 → 시스템 폰트 스택으로 대체
+         렌더 블로킹 요청(400~800ms) 제거
+         iOS: Apple SD Gothic Neo / Android: 기본 한국어 폰트 / Windows: Malgun Gothic */
 
       :root {
         --font-base: 20px;
-
         --bg: #f0f2f5;
         --surface: #ffffff;
         --border: #e4e7ec;
@@ -32,14 +33,10 @@
 
       * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
 
-      html {
-        font-size: var(--font-base);
-        height: 100%;
-        overflow-y: auto;
-      }
+      html { font-size: var(--font-base); height: 100%; overflow-y: auto; }
 
       body {
-        font-family: "Noto Sans KR", sans-serif;
+        font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕", sans-serif;
         background: var(--bg);
         color: var(--text-main);
         font-size: 1rem;
@@ -47,7 +44,6 @@
         height: 100%;
       }
 
-      /* ── 헤더 ── */
       .header {
         background: var(--accent);
         padding: 20px 20px 24px;
@@ -55,10 +51,7 @@
         top: 0;
         z-index: 10;
       }
-      /* 수정 모드 헤더 — 주황색 */
-      .header.edit-mode {
-        background: var(--warning);
-      }
+      .header.edit-mode { background: var(--warning); }
       .header-top {
         display: flex;
         align-items: center;
@@ -74,24 +67,10 @@
         border-radius: 100px;
         letter-spacing: 0.5px;
       }
-      .header-date {
-        font-size: 0.8125rem;
-        color: rgba(255,255,255,0.7);
-        font-weight: 400;
-      }
-      .header-title {
-        font-size: 1.625rem;
-        font-weight: 800;
-        color: #fff;
-        letter-spacing: -0.5px;
-      }
-      .header-subtitle {
-        font-size: 0.875rem;
-        color: rgba(255,255,255,0.65);
-        margin-top: 2px;
-      }
+      .header-date { font-size: 0.8125rem; color: rgba(255,255,255,0.7); font-weight: 400; }
+      .header-title { font-size: 1.625rem; font-weight: 800; color: #fff; letter-spacing: -0.5px; }
+      .header-subtitle { font-size: 0.875rem; color: rgba(255,255,255,0.65); margin-top: 2px; }
 
-      /* ── 수정 모드 배너 ── */
       .edit-mode-banner {
         margin: 16px 16px 0;
         padding: 16px 18px;
@@ -106,7 +85,6 @@
       .edit-mode-banner.show { display: block; }
       .edit-mode-banner b { display: block; margin-bottom: 4px; font-size: 0.9375rem; }
 
-      /* ── 직전 계기판 카드 ── */
       .prev-card {
         margin: 16px 16px 0;
         background: #fff;
@@ -118,39 +96,18 @@
         gap: 16px;
       }
       .prev-icon {
-        width: 52px;
-        height: 52px;
+        width: 52px; height: 52px;
         background: var(--accent-light);
         border-radius: 14px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        display: flex; align-items: center; justify-content: center;
         font-size: 1.625rem;
         flex-shrink: 0;
       }
       .prev-info { flex: 1; min-width: 0; }
-      .prev-label {
-        font-size: 0.75rem;
-        font-weight: 600;
-        color: var(--text-sub);
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-        margin-bottom: 4px;
-      }
-      .prev-value {
-        font-size: 1.75rem;
-        font-weight: 800;
-        color: var(--accent);
-        letter-spacing: -1px;
-        line-height: 1;
-      }
-      .prev-sub {
-        font-size: 0.75rem;
-        color: var(--text-sub);
-        margin-top: 5px;
-      }
+      .prev-label { font-size: 0.75rem; font-weight: 600; color: var(--text-sub); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 4px; }
+      .prev-value { font-size: 1.75rem; font-weight: 800; color: var(--accent); letter-spacing: -1px; line-height: 1; }
+      .prev-sub { font-size: 0.75rem; color: var(--text-sub); margin-top: 5px; }
 
-      /* ── 최초 등록 배너 ── */
       .first-record-banner {
         margin: 12px 16px 0;
         padding: 16px 18px;
@@ -163,12 +120,8 @@
       }
       .first-record-banner b { display: block; margin-bottom: 4px; font-size: 0.9375rem; }
 
-      /* ── 폼 컨테이너 ── */
-      .form-container {
-        padding: 12px 16px 0;
-      }
+      .form-container { padding: 12px 16px 0; }
 
-      /* ── 섹션 구분 라벨 ── */
       .section-label {
         font-size: 1rem;
         font-weight: 700;
@@ -178,7 +131,6 @@
         margin: 20px 4px 8px;
       }
 
-      /* ── 필드 카드 ── */
       .field-card {
         background: var(--surface);
         border-radius: var(--radius-sm);
@@ -188,21 +140,11 @@
         box-shadow: var(--shadow);
         transition: border-color 0.2s;
       }
-      .field-card.disabled {
-        opacity: 0.35;
-        pointer-events: none;
-        user-select: none;
-      }
+      .field-card.disabled { opacity: 0.35; pointer-events: none; user-select: none; }
       .field-card.step-done  { border-color: #86efac; }
       .field-card.step-pending { border-color: #fca5a5; }
 
-      /* ── 카드 헤더 ── */
-      .field-header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 10px;
-      }
+      .field-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
       .field-label {
         font-size: 1.2rem;
         font-weight: 700;
@@ -210,9 +152,7 @@
         letter-spacing: 0.6px;
         text-transform: uppercase;
         margin-bottom: 0;
-        display: flex;
-        align-items: center;
-        gap: 4px;
+        display: flex; align-items: center; gap: 4px;
         flex: 1;
         transition: color 0.2s;
       }
@@ -225,18 +165,11 @@
 
       .req { color: var(--danger); font-size: 0.875rem; }
 
-      /* ── 입력 요소 ── */
       select, input[type="text"] {
-        width: 100%;
-        border: none;
-        outline: none;
-        font-size: 1.0625rem;
-        font-family: inherit;
-        font-weight: 600;
-        color: var(--text-main);
-        background: transparent;
-        appearance: none;
-        -webkit-appearance: none;
+        width: 100%; border: none; outline: none;
+        font-size: 1.0625rem; font-family: inherit; font-weight: 600;
+        color: var(--text-main); background: transparent;
+        appearance: none; -webkit-appearance: none;
       }
       select {
         background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
@@ -247,248 +180,106 @@
       }
       select option { font-weight: 400; }
 
-      /* ── 계기판 입력 (크게) ── */
       .odo-input-wrap {
-        display: flex;
-        align-items: baseline;
-        gap: 8px;
-        justify-content: center;
-        padding: 10px 0 6px;
+        display: flex; align-items: baseline; gap: 8px;
+        justify-content: center; padding: 10px 0 6px;
       }
       input[type="number"] {
-        border: none;
-        outline: none;
-        font-size: 3rem;
-        font-weight: 800;
-        color: var(--accent);
-        text-align: center;
-        font-family: inherit;
-        background: transparent;
-        width: 100%;
-        letter-spacing: -2px;
+        border: none; outline: none;
+        font-size: 3rem; font-weight: 800; color: var(--accent);
+        text-align: center; font-family: inherit; background: transparent;
+        width: 100%; letter-spacing: -2px;
         -moz-appearance: textfield;
       }
       input[type="number"]::-webkit-inner-spin-button,
       input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
-      input[type="number"]::placeholder {
-        color: #cbd5e1;
-        font-weight: 700;
-      }
-      .odo-unit {
-        font-size: 1.125rem;
-        font-weight: 700;
-        color: var(--text-sub);
-        flex-shrink: 0;
-        padding-bottom: 8px;
-      }
+      input[type="number"]::placeholder { color: #cbd5e1; font-weight: 700; }
+      .odo-unit { font-size: 1.125rem; font-weight: 700; color: var(--text-sub); flex-shrink: 0; padding-bottom: 8px; }
 
-      /* ── 토글 버튼 ── */
       .toggle-group { display: flex; gap: 10px; }
       .toggle-btn {
-        flex: 1;
-        padding: 14px 10px;
-        border-radius: 12px;
-        border: 2px solid var(--border);
-        background: #f8fafc;
-        font-size: 0.9375rem;
-        font-weight: 700;
-        color: var(--text-sub);
-        cursor: pointer;
-        transition: all 0.15s;
-        font-family: inherit;
-        letter-spacing: -0.2px;
+        flex: 1; padding: 14px 10px; border-radius: 12px;
+        border: 2px solid var(--border); background: #f8fafc;
+        font-size: 0.9375rem; font-weight: 700; color: var(--text-sub);
+        cursor: pointer; transition: all 0.15s; font-family: inherit; letter-spacing: -0.2px;
       }
-      .toggle-btn.active {
-        background: var(--accent-light);
-        border-color: var(--accent);
-        color: var(--accent);
-      }
+      .toggle-btn.active { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
       .toggle-btn .toggle-icon { display: block; font-size: 1.375rem; margin-bottom: 4px; }
 
-      /* ── 에러 텍스트 ── */
       .err-text {
-        color: var(--danger);
-        font-size: 0.8125rem;
-        font-weight: 500;
-        margin-top: 10px;
-        display: none;
-        padding: 10px 14px;
-        background: #fef2f2;
-        border-radius: 10px;
+        color: var(--danger); font-size: 0.8125rem; font-weight: 500;
+        margin-top: 10px; display: none; padding: 10px 14px;
+        background: #fef2f2; border-radius: 10px;
       }
       .field-card.error .err-text { display: block; }
 
-      /* ── 하단 버튼 ── */
-      .bottom-actions {
-        padding: 16px 16px 32px;
-        background: var(--bg);
-        position: sticky;
-        bottom: 0;
-      }
+      .bottom-actions { padding: 16px 16px 32px; background: var(--bg); position: sticky; bottom: 0; }
       .bottom-actions::before {
-        content: '';
-        position: absolute;
-        top: -32px;
-        left: 0; right: 0;
-        height: 32px;
-        background: linear-gradient(to bottom, transparent, var(--bg));
-        pointer-events: none;
+        content: ''; position: absolute; top: -32px; left: 0; right: 0;
+        height: 32px; background: linear-gradient(to bottom, transparent, var(--bg)); pointer-events: none;
       }
       .submit-btn {
-        width: 100%;
-        padding: 20px;
-        background: var(--accent);
-        color: white;
-        border: none;
-        border-radius: var(--radius);
-        font-size: 1.125rem;
-        font-weight: 800;
-        font-family: inherit;
-        box-shadow: 0 4px 20px rgba(29, 78, 216, 0.35);
-        letter-spacing: -0.3px;
-        transition: opacity 0.15s, transform 0.1s;
-        cursor: pointer;
+        width: 100%; padding: 20px; background: var(--accent); color: white;
+        border: none; border-radius: var(--radius); font-size: 1.125rem; font-weight: 800;
+        font-family: inherit; box-shadow: 0 4px 20px rgba(29, 78, 216, 0.35);
+        letter-spacing: -0.3px; transition: opacity 0.15s, transform 0.1s; cursor: pointer;
       }
-      /* 수정 모드 저장 버튼 — 주황색 */
-      .submit-btn.edit-mode {
-        background: var(--warning);
-        box-shadow: 0 4px 20px rgba(217, 119, 6, 0.35);
-      }
+      .submit-btn.edit-mode { background: var(--warning); box-shadow: 0 4px 20px rgba(217, 119, 6, 0.35); }
       .submit-btn:active { transform: scale(0.98); }
-      .submit-btn:disabled {
-        background: #cbd5e1;
-        color: #94a3b8;
-        box-shadow: none;
-        cursor: default;
-      }
+      .submit-btn:disabled { background: #cbd5e1; color: #94a3b8; box-shadow: none; cursor: default; }
 
-      /* ── 로딩 오버레이 ── */
       .loading-overlay {
-        display: none;
-        position: fixed;
-        inset: 0;
+        display: none; position: fixed; inset: 0;
         background: rgba(255,255,255,0.92);
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        z-index: 100;
-        backdrop-filter: blur(4px);
+        flex-direction: column; align-items: center; justify-content: center;
+        z-index: 100; backdrop-filter: blur(4px);
       }
       .loading-overlay.show { display: flex; }
       .spinner {
         width: 48px; height: 48px;
-        border: 4px solid #e2e8f0;
-        border-top: 4px solid var(--accent);
-        border-radius: 50%;
-        animation: spin 0.85s linear infinite;
+        border: 4px solid #e2e8f0; border-top: 4px solid var(--accent);
+        border-radius: 50%; animation: spin 0.85s linear infinite;
       }
-      .loading-text {
-        margin-top: 16px;
-        font-size: 1rem;
-        font-weight: 700;
-        color: var(--text-sub);
-      }
+      .loading-text { margin-top: 16px; font-size: 1rem; font-weight: 700; color: var(--text-sub); }
       @keyframes spin { to { transform: rotate(360deg); } }
 
-      /* ── 결과 화면 ── */
       #resultArea {
-        padding: 0;
-        display: none;
-        min-height: 100vh;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
+        padding: 0; display: none; min-height: 100vh;
+        flex-direction: column; align-items: center; justify-content: center;
         background: var(--bg);
       }
       #resultArea.show { display: flex; }
-      .result-inner {
-        padding: 40px 24px;
-        width: 100%;
-        max-width: 480px;
-        text-align: center;
-      }
+      .result-inner { padding: 40px 24px; width: 100%; max-width: 480px; text-align: center; }
       .result-emoji {
-        width: 80px; height: 80px;
-        background: #dcfce7;
-        border-radius: 50%;
+        width: 80px; height: 80px; background: #dcfce7; border-radius: 50%;
         display: flex; align-items: center; justify-content: center;
-        font-size: 40px;
-        margin: 0 auto 24px;
+        font-size: 40px; margin: 0 auto 24px;
       }
-      /* 수정 완료 시 주황 배경 */
       .result-emoji.edit { background: #fef3c7; }
-
-      .result-title {
-        font-size: 1.625rem;
-        font-weight: 800;
-        color: var(--text-main);
-        margin-bottom: 8px;
-        letter-spacing: -0.5px;
-      }
-      .result-desc {
-        font-size: 0.9375rem;
-        color: var(--text-sub);
-        margin-bottom: 28px;
-      }
+      .result-title { font-size: 1.625rem; font-weight: 800; color: var(--text-main); margin-bottom: 8px; letter-spacing: -0.5px; }
+      .result-desc { font-size: 0.9375rem; color: var(--text-sub); margin-bottom: 28px; }
       .result-detail-card {
-        background: #fff;
-        padding: 20px 22px;
-        border-radius: var(--radius);
-        text-align: left;
-        font-size: 0.9375rem;
-        line-height: 1.9;
-        box-shadow: var(--shadow);
-        margin-bottom: 24px;
+        background: #fff; padding: 20px 22px; border-radius: var(--radius);
+        text-align: left; font-size: 0.9375rem; line-height: 1.9;
+        box-shadow: var(--shadow); margin-bottom: 24px;
       }
-      .result-detail-card b { color: var(--text-sub); font-weight: 600; font-size: 0.75rem; margin-right: 4px; }
       .result-row { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); padding: 10px 0; }
       .result-row:last-child { border-bottom: none; padding-bottom: 0; }
       .result-row .label { font-size: 0.8125rem; font-weight: 600; color: var(--text-sub); min-width: 70px; }
       .result-row .value { font-size: 1rem; font-weight: 700; color: var(--text-main); }
-      .result-row .value.strike {
-        text-decoration: line-through;
-        color: var(--text-sub);
-        font-weight: 400;
-        font-size: 0.875rem;
-      }
-      .result-row .value.new {
-        color: var(--warning);
-      }
+      .result-row .value.strike { text-decoration: line-through; color: var(--text-sub); font-weight: 400; font-size: 0.875rem; }
+      .result-row .value.new { color: var(--warning); }
 
-      /* ── 결과 화면 버튼 그룹 ── */
-      .result-btn-group {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        width: 100%;
-      }
+      .result-btn-group { display: flex; flex-direction: column; gap: 10px; width: 100%; }
       .result-edit-btn {
-        background: var(--warning);
-        color: #fff;
-        border: none;
-        font-weight: 800;
-        font-size: 1rem;
-        font-family: inherit;
-        padding: 18px 32px;
-        border-radius: var(--radius-sm);
-        cursor: pointer;
-        width: 100%;
+        background: var(--warning); color: #fff; border: none;
+        font-weight: 800; font-size: 1rem; font-family: inherit;
+        padding: 18px 32px; border-radius: var(--radius-sm);
+        cursor: pointer; width: 100%;
         box-shadow: 0 4px 16px rgba(217, 119, 6, 0.3);
         transition: opacity 0.15s, transform 0.1s;
       }
       .result-edit-btn:active { transform: scale(0.98); }
-      .result-reload-btn {
-        background: none;
-        border: 2px solid var(--accent);
-        color: var(--accent);
-        font-weight: 700;
-        font-size: 1rem;
-        font-family: inherit;
-        padding: 16px 32px;
-        border-radius: var(--radius-sm);
-        cursor: pointer;
-        width: 100%;
-      }
     </style>
   </head>
   <body>
@@ -507,7 +298,6 @@
       <div class="loading-text" id="overlayText">저장 중...</div>
     </div>
 
-    <!-- 메인 콘텐츠 -->
     <div id="mainContent">
       <div class="header" id="mainHeader">
         <div class="header-top">
@@ -518,13 +308,11 @@
         <div class="header-subtitle" id="headerSubtitle">주행 정보를 입력해 주세요</div>
       </div>
 
-      <!-- 수정 모드 배너 -->
       <div class="edit-mode-banner" id="editModeBanner">
         <b>✏️ 수정 모드</b>
         방금 저장한 기록을 수정합니다.<br>변경할 항목만 수정 후 저장해 주세요.
       </div>
 
-      <!-- 직전 계기판 -->
       <div class="prev-card" id="prevCard">
         <div class="prev-icon">🚗</div>
         <div class="prev-info">
@@ -534,15 +322,12 @@
         </div>
       </div>
 
-      <!-- 최초 등록 배너 -->
       <div class="first-record-banner" id="firstRecordBanner" style="display:none">
         <b>📋 최초 계기판 등록</b>
         이 차량의 첫 번째 기록입니다.<br>현재 계기판 수치만 입력하면 됩니다.
       </div>
 
-      <!-- 폼 -->
       <div class="form-container" id="mainForm">
-
         <div class="section-label">운전자 정보</div>
 
         <div class="field-card step-pending" id="fieldNameCard">
@@ -578,13 +363,7 @@
             <span class="status-icon" id="iconOdo">!</span>
           </div>
           <div class="odo-input-wrap">
-            <input
-              type="number"
-              id="currentOdo"
-              placeholder="0"
-              inputmode="numeric"
-              oninput="validateOdo()"
-            />
+            <input type="number" id="currentOdo" placeholder="0" inputmode="numeric" oninput="validateOdo()" />
             <span class="odo-unit">km</span>
           </div>
           <div id="odoErr" class="err-text">정확한 숫자를 입력해주세요.</div>
@@ -605,28 +384,22 @@
               <option value="" selected>거래처를 선택하세요</option>
               <option value="__direct__">직접 입력하기</option>
             </select>
-            <input
-              type="text"
-              id="noteDirectInput"
-              placeholder="거래처 직접 입력"
+            <input type="text" id="noteDirectInput" placeholder="거래처 직접 입력"
               style="display:none; border-bottom: 1.5px solid var(--border); padding: 8px 0; margin-top: 6px;"
-              oninput="updateNoteStatus()"
-            />
+              oninput="updateNoteStatus()" />
           </div>
         </div>
 
         <div style="height: 16px;"></div>
-
-      </div><!-- /mainForm -->
+      </div>
 
       <div class="bottom-actions">
         <button class="submit-btn" id="submitBtn" onclick="submitForm()" disabled>
           기록 저장하기
         </button>
       </div>
-    </div><!-- /mainContent -->
+    </div>
 
-    <!-- 결과 화면 -->
     <div id="resultArea">
       <div class="result-inner">
         <div class="result-emoji" id="resultEmoji">✅</div>
@@ -635,13 +408,11 @@
         <div class="result-detail-card" id="resultDetail"></div>
         <div class="result-btn-group">
           <button class="result-edit-btn" id="editBtn" onclick="enterEditMode()">✏️ 수정하기</button>
-          <button class="result-reload-btn" onclick="location.reload()">새로 작성하기</button>
         </div>
       </div>
     </div>
 
     <script>
-      // ── 1. 초기 데이터 로드 및 전역 변수 ───────────────────────────
       const _CONFIG = JSON.parse(document.getElementById("config-raw").textContent);
       const STAFF = _CONFIG.staff;
       const FIXED_USER = _CONFIG.fixedUser;
@@ -653,12 +424,9 @@
       let selectedType = "일반업무용";
       let isBusinessTrip = false;
       let isFirst = false;
-
-      // 수정 모드 상태
       let isEditMode = false;
-      let savedRecord = null; // { id, carNo, name, dept, useType, currentOdo, prevOdo, note, carRowIndex }
+      let savedRecord = null;
 
-      // ── 2. 상태 헬퍼 ─────────────────────────────────────────────────
       function setCardDone(cardId, iconId) {
         const card = document.getElementById(cardId);
         const icon = document.getElementById(iconId);
@@ -678,7 +446,6 @@
         if (icon) { icon.textContent = ""; }
       }
 
-      // ── 3. 초기화 ────────────────────────────────────────────────────
       window.onload = function () {
         const now = new Date();
         const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
@@ -706,7 +473,6 @@
           });
         }
 
-        // 공용/고정 차량 분기
         isBusinessTrip = BUSINESS_TRIP_CARS.includes(carNo);
         const fixed = FIXED_USER[carNo];
         const sel = document.getElementById("selName");
@@ -721,7 +487,6 @@
           });
         }
 
-        // 출장용 차량: 비고가 필수이므로 pending
         if (isBusinessTrip) {
           document.getElementById("noteLabel").innerHTML = '방문 거래처 <span class="req">*</span>';
           document.getElementById("noteGeneral").style.display = "none";
@@ -740,20 +505,15 @@
           noteSelect.appendChild(directOpt);
         }
 
-        // 사용 구분은 디폴트값(일반업무)이 있으므로 처음부터 완료
         selectType("일반업무용");
         setCardDone("fieldTypeCard", "iconType");
       };
 
-      // ── 4. 이벤트 핸들러 ─────────────────────────────────────────────
       function updateDept() {
         const sel = document.getElementById("selName");
         const staffInfo = STAFF.find((s) => s.name === sel.value);
-        if (staffInfo) {
-          setCardDone("fieldNameCard", "iconName");
-        } else {
-          setCardPending("fieldNameCard", "iconName");
-        }
+        if (staffInfo) setCardDone("fieldNameCard", "iconName");
+        else setCardPending("fieldNameCard", "iconName");
       }
 
       function validateOdo() {
@@ -761,13 +521,8 @@
         const err = document.getElementById("odoErr");
 
         if (!val) { setCardPending("fieldOdoCard", "iconOdo"); setBtnState(false); return; }
+        if (isFirst) { setBtnState(true); return; }
 
-        if (isFirst) {
-          setBtnState(true);
-          return;
-        }
-
-        // 수정 모드: prevOdo는 원본 기록의 prevOdo를 기준으로 검증
         const baseOdo = isEditMode ? savedRecord.prevOdo : prevOdo;
 
         if (val < baseOdo) {
@@ -802,16 +557,14 @@
       }
 
       function updateNoteStatus() {
-        let val = "";
         if (isBusinessTrip) {
           const sel = document.getElementById("noteSelect");
-          val = sel.value === "__direct__"
-            ? document.getElementById("noteDirectInput").value
-            : sel.value;
+          const val = sel.value === "__direct__"
+            ? document.getElementById("noteDirectInput").value : sel.value;
           if (val && val !== "__direct__") setCardDone("fieldNoteCard", "iconNote");
           else setCardPending("fieldNoteCard", "iconNote");
         } else {
-          val = document.getElementById("noteText").value;
+          const val = document.getElementById("noteText").value;
           if (val) setCardDone("fieldNoteCard", "iconNote");
           else setCardNeutral("fieldNoteCard", "iconNote");
         }
@@ -820,82 +573,61 @@
       function setBtnState(enabled, text) {
         const btn = document.getElementById("submitBtn");
         btn.disabled = !enabled;
-        if (!isFirst) {
-          btn.textContent = text || (isEditMode ? "수정 저장하기" : "기록 저장하기");
-        }
+        if (!isFirst) btn.textContent = text || (isEditMode ? "수정 저장하기" : "기록 저장하기");
       }
 
-      // ── 5. 수정 모드 진입 ────────────────────────────────────────────
       function enterEditMode() {
         if (!savedRecord) return;
-
         isEditMode = true;
 
-        // 결과 화면 숨기고 폼 다시 표시
         document.getElementById("resultArea").classList.remove("show");
         document.getElementById("mainContent").style.display = "block";
-
-        // UI 수정 모드 표시
         document.getElementById("mainHeader").classList.add("edit-mode");
         document.getElementById("headerTitle").textContent = "운행 일지 수정";
         document.getElementById("headerSubtitle").textContent = "저장된 기록을 수정합니다";
         document.getElementById("editModeBanner").classList.add("show");
 
-        // 제출 버튼 스타일
         const btn = document.getElementById("submitBtn");
         btn.classList.add("edit-mode");
         btn.textContent = "수정 저장하기";
         btn.disabled = false;
 
-        // 직전 계기판 카드: 수정 모드에서는 원본 prevOdo 기준으로 표시
         if (savedRecord.prevOdo !== null) {
           document.getElementById("prevOdoDisplay").textContent = savedRecord.prevOdo.toLocaleString() + " km";
           document.getElementById("prevOdoSub").textContent = "원본 기록 기준";
         }
 
-        // 폼 필드에 기존 값 채우기
-        // 운전자
         const fixed = FIXED_USER[carNo];
         if (!fixed && savedRecord.name) {
-          const sel = document.getElementById("selName");
-          sel.value = savedRecord.name;
+          document.getElementById("selName").value = savedRecord.name;
           setCardDone("fieldNameCard", "iconName");
         }
 
-        // 사용 구분
         selectType(savedRecord.useType || "일반업무용");
-
-        // 계기판
         document.getElementById("currentOdo").value = savedRecord.currentOdo;
         setCardDone("fieldOdoCard", "iconOdo");
 
-        // 비고
         if (isBusinessTrip) {
-          const clientsInList = CLIENTS.includes(savedRecord.note);
           const noteSelect = document.getElementById("noteSelect");
-          if (clientsInList) {
+          if (CLIENTS.includes(savedRecord.note)) {
             noteSelect.value = savedRecord.note;
           } else if (savedRecord.note) {
             noteSelect.value = "__direct__";
             document.getElementById("noteDirectInput").style.display = "block";
             document.getElementById("noteDirectInput").value = savedRecord.note;
           }
-          updateNoteStatus();
         } else {
           document.getElementById("noteText").value = savedRecord.note || "";
-          updateNoteStatus();
         }
+        updateNoteStatus();
 
-        // 필드 활성화 보장 (최초 등록 모드였더라도)
         ["fieldNameCard","fieldTypeCard","fieldOdoCard","fieldNoteCard"].forEach(id => {
           const c = document.getElementById(id);
           if (c) c.classList.remove("disabled");
         });
       }
 
-      // ── 6. 서버 전송 ──────────────────────────────────────────────────
       function submitForm() {
-
         // ── 수정 모드 전송 ──
         if (isEditMode) {
           const odoVal = Number(document.getElementById("currentOdo").value);
@@ -908,8 +640,7 @@
           let note = "";
           if (isBusinessTrip) {
             const selVal = document.getElementById("noteSelect").value;
-            note = selVal === "__direct__"
-              ? document.getElementById("noteDirectInput").value : selVal;
+            note = selVal === "__direct__" ? document.getElementById("noteDirectInput").value : selVal;
             if (!note) { alert("방문 거래처를 입력/선택해주세요."); return; }
           } else {
             note = document.getElementById("noteText").value;
@@ -920,35 +651,12 @@
           document.getElementById("overlayText").textContent = "수정 중...";
           document.getElementById("overlay").classList.add("show");
 
-          const updatePayload = {
-            originalId: savedRecord.id,
-            carRowIndex: savedRecord.carRowIndex,
-            carNo,
-            name,
-            dept,
-            useType: selectedType,
-            currentOdo: odoVal,
-            prevOdo: savedRecord.prevOdo,
-            note,
-          };
-
           google.script.run
             .withSuccessHandler((data) => {
               document.getElementById("overlay").classList.remove("show");
               if (data.success) {
-                // 저장 기록 갱신 (재수정 대비)
-                savedRecord = {
-                  ...savedRecord,
-                  id: data.newId,
-                  name,
-                  dept,
-                  useType: selectedType,
-                  currentOdo: odoVal,
-                  note,
-                };
-
-                const mileage = savedRecord.prevOdo !== null
-                  ? odoVal - savedRecord.prevOdo : 0;
+                savedRecord = { ...savedRecord, id: data.newId, name, dept, useType: selectedType, currentOdo: odoVal, note };
+                const mileage = savedRecord.prevOdo !== null ? odoVal - savedRecord.prevOdo : 0;
 
                 document.getElementById("mainContent").style.display = "none";
                 document.getElementById("resultEmoji").textContent = "✏️";
@@ -958,26 +666,23 @@
                 document.getElementById("resultDetail").innerHTML = `
                   <div class="result-row"><span class="label">차량</span><span class="value">${carNo}</span></div>
                   <div class="result-row"><span class="label">운전자</span><span class="value">${dept} ${name}</span></div>
-                  <div class="result-row">
-                    <span class="label">주행 후</span>
-                    <span class="value">${odoVal.toLocaleString()} km</span>
-                  </div>
+                  <div class="result-row"><span class="label">주행 후</span><span class="value">${odoVal.toLocaleString()} km</span></div>
                   <div class="result-row"><span class="label">주행 거리</span><span class="value">${mileage} km</span></div>
                   ${note ? `<div class="result-row"><span class="label">비고</span><span class="value">${note}</span></div>` : ""}
                 `;
                 document.getElementById("resultArea").classList.add("show");
-                // 수정 완료 후 다시 수정 버튼 활성화
                 isEditMode = false;
-              } else {
-                alert("수정 실패: " + data.message);
-              }
+              } else { alert("수정 실패: " + data.message); }
             })
             .withFailureHandler((err) => {
               document.getElementById("overlay").classList.remove("show");
               alert("오류 발생: " + err.message);
             })
-            .updateRecord(updatePayload);
-
+            .updateRecord({
+              originalId: savedRecord.id, carRowIndex: savedRecord.carRowIndex,
+              carNo, name, dept, useType: selectedType,
+              currentOdo: odoVal, prevOdo: savedRecord.prevOdo, note,
+            });
           return;
         }
 
@@ -992,24 +697,12 @@
             .withSuccessHandler((data) => {
               document.getElementById("overlay").classList.remove("show");
               if (data.success) {
-                // 최초 등록은 수정 불가 (prevOdo 없으므로)
-                savedRecord = {
-                  id: data.id,
-                  carNo,
-                  name: "",
-                  dept: "",
-                  useType: "",
-                  currentOdo: odoVal,
-                  prevOdo: null,
-                  note: "",
-                  carRowIndex: data.carRowIndex,
-                };
+                savedRecord = { id: data.id, carNo, name: "", dept: "", useType: "", currentOdo: odoVal, prevOdo: null, note: "", carRowIndex: data.carRowIndex };
                 document.getElementById("mainContent").style.display = "none";
                 document.getElementById("resultDetail").innerHTML = `
                   <div class="result-row"><span class="label">차량</span><span class="value">${carNo}</span></div>
                   <div class="result-row"><span class="label">초기 계기판</span><span class="value">${odoVal.toLocaleString()} km</span></div>
                 `;
-                // 최초 등록은 수정 버튼 숨김
                 document.getElementById("editBtn").style.display = "none";
                 document.getElementById("resultArea").classList.add("show");
               } else { alert("저장 실패: " + data.message); }
@@ -1026,8 +719,7 @@
         let note = "";
         if (isBusinessTrip) {
           const selVal = document.getElementById("noteSelect").value;
-          note = selVal === "__direct__"
-            ? document.getElementById("noteDirectInput").value : selVal;
+          note = selVal === "__direct__" ? document.getElementById("noteDirectInput").value : selVal;
           if (!note) { alert("방문 거래처를 입력/선택해주세요."); return; }
         } else {
           note = document.getElementById("noteText").value;
@@ -1042,19 +734,7 @@
           .withSuccessHandler((data) => {
             document.getElementById("overlay").classList.remove("show");
             if (data.success) {
-              // 저장 성공 — 수정에 필요한 정보 보관
-              savedRecord = {
-                id: data.id,
-                carNo,
-                name,
-                dept,
-                useType: selectedType,
-                currentOdo: odoVal,
-                prevOdo,
-                note,
-                carRowIndex: data.carRowIndex,
-              };
-
+              savedRecord = { id: data.id, carNo, name, dept, useType: selectedType, currentOdo: odoVal, prevOdo, note, carRowIndex: data.carRowIndex };
               document.getElementById("mainContent").style.display = "none";
               document.getElementById("resultDetail").innerHTML = `
                 <div class="result-row"><span class="label">차량</span><span class="value">${carNo}</span></div>
