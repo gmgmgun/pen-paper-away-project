@@ -37,15 +37,15 @@ const COL = {
 
 // 차량 탭 열 위치 (1-based)
 const CAR_COL = {
-  날짜: 1, // A
-  부서: 6, // F
-  성명: 10, // J
-  주행전: 14, // N
-  주행후: 20, // T
+  날짜: 1,    // A
+  부서: 6,    // F
+  성명: 10,   // J
+  주행전: 14,  // N
+  주행후: 20,  // T
   주행거리: 26, // Z
-  출퇴근: 32, // AF
+  출퇴근: 32,  // AF
   일반업무: 38, // AL
-  비고: 44, // AR
+  비고: 44,   // AR
 };
 
 function getSpreadsheet() {
@@ -140,8 +140,7 @@ function getPrevOdoData(carNo) {
   const prevOdo = carSh.getRange(lastDataRow, CAR_COL.주행후).getValue();
   const prevDate = carSh.getRange(lastDataRow, CAR_COL.날짜).getValue();
 
-  if (!prevOdo || Number(prevOdo) === 0)
-    return { prevOdo: null, prevDate: null, carName };
+  if (!prevOdo || Number(prevOdo) === 0) return { prevOdo: null, prevDate: null, carName };
 
   return {
     prevOdo: Number(prevOdo),
@@ -151,7 +150,7 @@ function getPrevOdoData(carNo) {
 }
 
 // ── READ: 이상 감지 — 차량 탭에서 직접 읽기 ──────────────────────────
-function detectAnomalies({ carSh, 주행거리, prevOdo }) {
+function detectAnomalies({ carSh, 주행거리,  prevOdo }) {
   const flags = [];
 
   if (주행거리 < 0) {
@@ -182,8 +181,8 @@ function saveRecord(payload) {
 
   const 주행전 = isFirst ? "" : Number(payload.prevOdo);
   const 주행거리 = isFirst ? "" : 주행후 - Number(payload.prevOdo);
-  const 출퇴근 = isFirst ? "" : 사용구분 === "출퇴근용" ? 주행거리 : 0;
-  const 일반업무 = isFirst ? "" : 사용구분 === "일반업무용" ? 주행거리 : 0;
+  const 출퇴근 = isFirst ? "" : (사용구분 === "출퇴근용" ? 주행거리 : 0);
+  const 일반업무 = isFirst ? "" : (사용구분 === "일반업무용" ? 주행거리 : 0);
 
   const carSh = ss.getSheetByName(차량번호);
 
@@ -198,11 +197,7 @@ function saveRecord(payload) {
 
   const id = Utilities.getUuid();
   const flagStr = flags.length > 0 ? flags.join(" | ") : "정상";
-  const 타임스탬프 = Utilities.formatDate(
-    now,
-    "Asia/Seoul",
-    "yyyy-MM-dd HH:mm:ss",
-  );
+  const 타임스탬프 = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd HH:mm:ss");
 
   // ── ① WRITE: RAW 시트 백업 저장 ───────────────────────────
   const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
@@ -221,7 +216,7 @@ function saveRecord(payload) {
     newRow[COL.사용구분] = isFirst ? "" : 사용구분;
     newRow[COL.출퇴근] = 출퇴근;
     newRow[COL.일반업무] = 일반업무;
-    newRow[COL.비고] = isFirst ? "" : payload.note || "";
+    newRow[COL.비고] = isFirst ? "" : (payload.note || "");
     newRow[COL.플래그] = flagStr;
     newRow[COL.타임스탬프] = 타임스탬프;
     rawSh.appendRow(newRow);
@@ -232,8 +227,9 @@ function saveRecord(payload) {
     const dateStr = `${now.getMonth() + 1}/${now.getDate()}(${요일})`;
 
     let lastDataRow = getLastDataRow(carSh);
-    const insertRow =
-      lastDataRow === -1 ? CONFIG.DATA_START_ROW : lastDataRow + 1;
+    const insertRow = lastDataRow === -1
+      ? CONFIG.DATA_START_ROW
+      : lastDataRow + 1;
 
     if (isFirst) {
       // 최초 등록: 날짜 + T열(주행후)만 기록
@@ -245,12 +241,8 @@ function saveRecord(payload) {
       carSh.getRange(insertRow, CAR_COL.부서).setValue(payload.dept);
       carSh.getRange(insertRow, CAR_COL.성명).setValue(payload.name);
       carSh.getRange(insertRow, CAR_COL.주행후).setValue(주행후);
-      carSh
-        .getRange(insertRow, CAR_COL.주행전)
-        .setFormula(`=T${insertRow - 1}`);
-      carSh
-        .getRange(insertRow, CAR_COL.주행거리)
-        .setFormula(`=T${insertRow}-N${insertRow}`);
+      carSh.getRange(insertRow, CAR_COL.주행전).setFormula(`=T${insertRow - 1}`);
+      carSh.getRange(insertRow, CAR_COL.주행거리).setFormula(`=T${insertRow}-N${insertRow}`);
       carSh.getRange(insertRow, CAR_COL.출퇴근).setValue(출퇴근);
       carSh.getRange(insertRow, CAR_COL.일반업무).setValue(일반업무);
       carSh.getRange(insertRow, CAR_COL.비고).setValue(payload.note || "");
