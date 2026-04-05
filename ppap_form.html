@@ -15,7 +15,7 @@
            이 값 하나만 바꾸면 전체 글자 크기가 비례해서 변합니다.
            기본값: 16px | 크게: 18px | 더 크게: 20px
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
-        --font-base: 24px;
+        --font-base: 20px;
 
         --bg: #f0f2f5;
         --surface: #ffffff;
@@ -168,30 +168,48 @@
         border-radius: var(--radius-sm);
         padding: 18px 20px;
         margin-bottom: 10px;
-        border: 2px solid transparent;
+        border: 2px solid var(--border);
         box-shadow: var(--shadow);
-        transition: border-color 0.18s;
+        transition: border-color 0.2s;
       }
-      .field-card:focus-within { border-color: var(--accent-mid); }
-      .field-card.active-focus { border-color: var(--accent); }
       .field-card.disabled {
         opacity: 0.35;
         pointer-events: none;
         user-select: none;
       }
-      .field-card.error { border-color: var(--danger) !important; }
+      /* 완료 — 초록 테두리 */
+      .field-card.step-done  { border-color: #86efac; }
+      /* 미입력 — 빨간 테두리 */
+      .field-card.step-pending { border-color: #fca5a5; }
 
+      /* ── 카드 헤더 ── */
+      .field-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
       .field-label {
-        font-size: 1.2em;
+        font-size: 1.2rem;
         font-weight: 700;
         color: var(--text-sub);
         letter-spacing: 0.6px;
         text-transform: uppercase;
-        margin-bottom: 10px;
+        margin-bottom: 0;
         display: flex;
         align-items: center;
         gap: 4px;
+        flex: 1;
+        transition: color 0.2s;
       }
+      .field-card.step-done .field-label    { color: var(--success); }
+      .field-card.step-pending .field-label { color: var(--danger); }
+
+      /* 상태 아이콘 */
+      .status-icon { font-size: 0.875rem; flex-shrink: 0; font-weight: 800; }
+      .field-card.step-done    .status-icon { color: var(--success); }
+      .field-card.step-pending .status-icon { color: var(--danger); }
+
       .req { color: var(--danger); font-size: 0.875rem; }
 
       /* ── 입력 요소 ── */
@@ -250,15 +268,6 @@
         flex-shrink: 0;
         padding-bottom: 8px;
       }
-
-      /* ── 부서 표시 ── */
-      .dept-display {
-        font-size: 1.0625rem;
-        font-weight: 700;
-        color: var(--accent);
-        min-height: 26px;
-      }
-      .dept-display.placeholder { color: var(--text-sub); font-weight: 400; }
 
       /* ── 토글 버튼 ── */
       .toggle-group { display: flex; gap: 10px; }
@@ -478,23 +487,23 @@
 
         <div class="section-label">운전자 정보</div>
 
-        <div class="field-card" id="fieldNameCard">
-          <div class="field-label"><span class="req">*</span>&nbsp;운전자</div>
+        <div class="field-card step-pending" id="fieldNameCard">
+          <div class="field-header">
+            <div class="field-label"><span class="req">*</span>&nbsp;운전자</div>
+            <span class="status-icon" id="iconName">!</span>
+          </div>
           <select id="selName" onchange="updateDept()">
             <option value="" disabled selected>운전자를 선택해 주세요</option>
           </select>
-          <div class="err-text">운전자를 선택해야 합니다.</div>
-        </div>
-
-        <div class="field-card" id="fieldDeptCard">
-          <div class="field-label">소속 부서</div>
-          <div id="deptDisplay" class="dept-display placeholder">운전자 선택 시 자동 입력</div>
         </div>
 
         <div class="section-label">주행 정보</div>
 
-        <div class="field-card" id="fieldTypeCard">
-          <div class="field-label"><span class="req">*</span>&nbsp;사용 구분</div>
+        <div class="field-card step-done" id="fieldTypeCard">
+          <div class="field-header">
+            <div class="field-label"><span class="req">*</span>&nbsp;사용 구분</div>
+            <span class="status-icon" id="iconType">✓</span>
+          </div>
           <div class="toggle-group">
             <button type="button" class="toggle-btn" id="btnBusiness" onclick="selectType('일반업무용')">
               <span class="toggle-icon">💼</span>일반업무
@@ -505,8 +514,11 @@
           </div>
         </div>
 
-        <div class="field-card" id="fieldOdoCard">
-          <div class="field-label"><span class="req">*</span>&nbsp;주행 후 계기판</div>
+        <div class="field-card step-pending" id="fieldOdoCard">
+          <div class="field-header">
+            <div class="field-label"><span class="req">*</span>&nbsp;주행 후 계기판</div>
+            <span class="status-icon" id="iconOdo">!</span>
+          </div>
           <div class="odo-input-wrap">
             <input
               type="number"
@@ -523,12 +535,15 @@
         <div class="section-label">비고</div>
 
         <div class="field-card" id="fieldNoteCard">
-          <div class="field-label" id="noteLabel">비고 (선택사항)</div>
+          <div class="field-header">
+            <div class="field-label" id="noteLabel">비고 (선택사항)</div>
+            <span class="status-icon" id="iconNote"></span>
+          </div>
           <div id="noteGeneral">
-            <input type="text" id="noteText" placeholder="특이사항을 적어주세요" />
+            <input type="text" id="noteText" placeholder="특이사항을 적어주세요" oninput="updateNoteStatus()" />
           </div>
           <div id="noteCombo" style="display:none">
-            <select id="noteSelect" style="margin-bottom:10px">
+            <select id="noteSelect" style="margin-bottom:10px" onchange="onNoteSelectChange()">
               <option value="" selected>거래처를 선택하세요</option>
               <option value="__direct__">직접 입력하기</option>
             </select>
@@ -537,11 +552,11 @@
               id="noteDirectInput"
               placeholder="거래처 직접 입력"
               style="display:none; border-bottom: 1.5px solid var(--border); padding: 8px 0; margin-top: 6px;"
+              oninput="updateNoteStatus()"
             />
           </div>
         </div>
 
-        <!-- 하단 버튼 공간 확보 -->
         <div style="height: 16px;"></div>
 
       </div><!-- /mainForm -->
@@ -578,16 +593,34 @@
       let isBusinessTrip = false;
       let isFirst = false;
 
-      // ── 2. 초기화 ────────────────────────────────────────────────────
+      // ── 2. 상태 헬퍼 ─────────────────────────────────────────────────
+      function setCardDone(cardId, iconId) {
+        const card = document.getElementById(cardId);
+        const icon = document.getElementById(iconId);
+        if (card) { card.classList.remove("step-pending"); card.classList.add("step-done"); }
+        if (icon) { icon.textContent = "✓"; }
+      }
+      function setCardPending(cardId, iconId) {
+        const card = document.getElementById(cardId);
+        const icon = document.getElementById(iconId);
+        if (card) { card.classList.remove("step-done"); card.classList.add("step-pending"); }
+        if (icon) { icon.textContent = "!"; }
+      }
+      function setCardNeutral(cardId, iconId) {
+        const card = document.getElementById(cardId);
+        const icon = document.getElementById(iconId);
+        if (card) { card.classList.remove("step-done", "step-pending"); }
+        if (icon) { icon.textContent = ""; }
+      }
+
+      // ── 3. 초기화 ────────────────────────────────────────────────────
       window.onload = function () {
-        // 날짜 표시
         const now = new Date();
         const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
         document.getElementById("headerDate").textContent =
           `${now.getMonth() + 1}월 ${now.getDate()}일 (${WEEK[now.getDay()]})`;
         document.getElementById("headerCar").textContent = carNo || "차량 정보 없음";
 
-        // 직전 계기판 데이터 주입
         const pData = JSON.parse(document.getElementById("prevodo-raw").textContent);
 
         if (pData && pData.prevOdo) {
@@ -602,97 +635,86 @@
           document.getElementById("prevOdoSub").textContent = "새 차량이거나 기록이 없습니다.";
           document.getElementById("firstRecordBanner").style.display = "block";
           document.getElementById("submitBtn").textContent = "초기값 등록하기";
-          document.getElementById("fieldNameCard").classList.add("disabled");
-          document.getElementById("fieldDeptCard").classList.add("disabled");
-          document.getElementById("fieldTypeCard").classList.add("disabled");
-          document.getElementById("fieldNoteCard").classList.add("disabled");
+          ["fieldNameCard","fieldTypeCard","fieldOdoCard","fieldNoteCard"].forEach(id => {
+            const c = document.getElementById(id);
+            if (c) { c.classList.add("disabled"); c.classList.remove("step-pending"); }
+          });
         }
 
-        // 공용/고정 차량 UI 분기
+        // 공용/고정 차량 분기
         isBusinessTrip = BUSINESS_TRIP_CARS.includes(carNo);
         const fixed = FIXED_USER[carNo];
         const sel = document.getElementById("selName");
 
         if (fixed) {
           document.getElementById("fieldNameCard").style.display = "none";
-          const dept = document.getElementById("deptDisplay");
-          dept.textContent = fixed.dept + " " + fixed.name;
-          dept.classList.remove("placeholder");
         } else {
           STAFF.forEach((p) => {
             let opt = document.createElement("option");
-            opt.value = p.name;
-            opt.textContent = p.name;
+            opt.value = p.name; opt.textContent = p.name;
             sel.appendChild(opt);
           });
         }
 
-        // 출장용 차량 거래처 UI
+        // 출장용 차량: 비고가 필수이므로 pending
         if (isBusinessTrip) {
           document.getElementById("noteLabel").innerHTML = '방문 거래처 <span class="req">*</span>';
           document.getElementById("noteGeneral").style.display = "none";
           document.getElementById("noteCombo").style.display = "block";
+          setCardPending("fieldNoteCard", "iconNote");
 
           const noteSelect = document.getElementById("noteSelect");
           noteSelect.innerHTML = '<option value="" selected>거래처를 선택하세요</option>';
-
           CLIENTS.forEach((client) => {
             let opt = document.createElement("option");
             opt.value = client; opt.textContent = client;
             noteSelect.appendChild(opt);
           });
-
           let directOpt = document.createElement("option");
           directOpt.value = "__direct__"; directOpt.textContent = "직접 입력하기";
           noteSelect.appendChild(directOpt);
-
-          noteSelect.onchange = function () {
-            document.getElementById("noteDirectInput").style.display =
-              this.value === "__direct__" ? "block" : "none";
-          };
         }
 
+        // 사용 구분은 디폴트값(일반업무)이 있으므로 처음부터 완료
         selectType("일반업무용");
+        setCardDone("fieldTypeCard", "iconType");
       };
 
-      // ── 3. 이벤트 핸들러 ─────────────────────────────────────────────
+      // ── 4. 이벤트 핸들러 ─────────────────────────────────────────────
       function updateDept() {
         const sel = document.getElementById("selName");
-        const dept = document.getElementById("deptDisplay");
         const staffInfo = STAFF.find((s) => s.name === sel.value);
         if (staffInfo) {
-          dept.textContent = staffInfo.dept;
-          dept.classList.remove("placeholder");
-          dept.style.color = "var(--accent)";
+          setCardDone("fieldNameCard", "iconName");
         } else {
-          dept.textContent = "운전자 선택 시 자동 입력";
-          dept.classList.add("placeholder");
+          setCardPending("fieldNameCard", "iconName");
         }
       }
 
       function validateOdo() {
         const val = Number(document.getElementById("currentOdo").value);
-        const card = document.getElementById("fieldOdoCard");
         const err = document.getElementById("odoErr");
 
-        if (!val) { setBtnState(false); return; }
+        if (!val) { setCardPending("fieldOdoCard", "iconOdo"); setBtnState(false); return; }
 
         if (isFirst) {
-          card.classList.remove("error");
           setBtnState(true);
           return;
         }
 
         if (val < prevOdo) {
           err.textContent = `직전 기록(${prevOdo.toLocaleString()}km)보다 낮습니다.`;
-          card.classList.add("error");
+          document.getElementById("fieldOdoCard").classList.add("error");
+          setCardPending("fieldOdoCard", "iconOdo");
           setBtnState(false, "계기판 확인 필요");
         } else if (val === prevOdo) {
           err.textContent = `직전 기록과 같습니다. 주행 후 값을 입력해 주세요.`;
-          card.classList.add("error");
+          document.getElementById("fieldOdoCard").classList.add("error");
+          setCardPending("fieldOdoCard", "iconOdo");
           setBtnState(false, "주행 거리 확인");
         } else {
-          card.classList.remove("error");
+          document.getElementById("fieldOdoCard").classList.remove("error");
+          setCardDone("fieldOdoCard", "iconOdo");
           setBtnState(true);
         }
       }
@@ -701,6 +723,30 @@
         selectedType = type;
         document.getElementById("btnCommute").classList.toggle("active", type === "출퇴근용");
         document.getElementById("btnBusiness").classList.toggle("active", type === "일반업무용");
+        setCardDone("fieldTypeCard", "iconType");
+      }
+
+      function onNoteSelectChange() {
+        const sel = document.getElementById("noteSelect");
+        document.getElementById("noteDirectInput").style.display =
+          sel.value === "__direct__" ? "block" : "none";
+        updateNoteStatus();
+      }
+
+      function updateNoteStatus() {
+        let val = "";
+        if (isBusinessTrip) {
+          const sel = document.getElementById("noteSelect");
+          val = sel.value === "__direct__"
+            ? document.getElementById("noteDirectInput").value
+            : sel.value;
+          if (val && val !== "__direct__") setCardDone("fieldNoteCard", "iconNote");
+          else setCardPending("fieldNoteCard", "iconNote");
+        } else {
+          val = document.getElementById("noteText").value;
+          if (val) setCardDone("fieldNoteCard", "iconNote");
+          else setCardNeutral("fieldNoteCard", "iconNote");
+        }
       }
 
       function setBtnState(enabled, text) {
@@ -709,12 +755,11 @@
         if (!isFirst) btn.textContent = text || "기록 저장하기";
       }
 
-      // ── 4. 서버 전송 ──────────────────────────────────────────────────
+      // ── 5. 서버 전송 ──────────────────────────────────────────────────
       function submitForm() {
         const odoVal = Number(document.getElementById("currentOdo").value);
         if (!odoVal) { alert("계기판 수치를 입력해주세요."); return; }
 
-        // 최초 기록 모드
         if (isFirst) {
           document.getElementById("overlay").classList.add("show");
           google.script.run
@@ -727,15 +772,12 @@
                   <div class="result-row"><span class="label">초기 계기판</span><span class="value">${odoVal.toLocaleString()} km</span></div>
                 `;
                 document.getElementById("resultArea").classList.add("show");
-              } else {
-                alert("저장 실패: " + data.message);
-              }
+              } else { alert("저장 실패: " + data.message); }
             })
             .saveRecord({ carNo, name: "", dept: "", useType: "", currentOdo: odoVal, prevOdo: null, note: "" });
           return;
         }
 
-        // 일반 기록 모드
         const fixed = FIXED_USER[carNo];
         const name = fixed ? fixed.name : document.getElementById("selName").value;
         const dept = fixed ? fixed.dept : STAFF.find((s) => s.name === name)?.dept;
@@ -766,9 +808,7 @@
                 <div class="result-row"><span class="label">주행 거리</span><span class="value">${data.mileage} km</span></div>
               `;
               document.getElementById("resultArea").classList.add("show");
-            } else {
-              alert("저장 실패: " + data.message);
-            }
+            } else { alert("저장 실패: " + data.message); }
           })
           .saveRecord({ carNo, name, dept, useType: selectedType, currentOdo: odoVal, prevOdo, note });
       }
