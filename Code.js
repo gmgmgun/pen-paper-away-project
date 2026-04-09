@@ -12,8 +12,8 @@
 // 3. getLastDataRow() 중복 호출 제거 — saveRecord() 안에서 1회만 호출
 // 4. SpreadsheetApp.flush() 명시적 호출 추가
 //
-// [버그 수정]
-// - updateRecord 함수 누락 복구
+// [변경 이력]
+// - 주차위치(parking) 필드 추가: RAW 시트 17번째 열(인덱스 16)에 저장
 //
 // ============================================================
 
@@ -42,6 +42,7 @@ const COL = {
   비고: 13,
   플래그: 14,
   타임스탬프: 15,
+  주차위치: 16, // 신규 추가
 };
 
 // 차량 탭 열 위치 (1-based)
@@ -146,7 +147,6 @@ function getLastDataRow(carSh) {
 // ── READ: 직전 계기판 조회 — 차량 탭 T열에서 직접 읽기 ───────────────
 function getPrevOdoData(carNo) {
   const ss = getSpreadsheet();
-  // [최적화 2] 마스터 시트 읽기 대신 캐시된 Script Properties 사용
   const carMeta = JSON.parse(
     PropertiesService.getScriptProperties().getProperty("CAR_META_JSON") ||
       "{}",
@@ -159,8 +159,6 @@ function getPrevOdoData(carNo) {
   const lastDataRow = getLastDataRow(carSh);
   if (lastDataRow === -1) return { prevOdo: null, prevDate: null, carName };
 
-  // [최적화 3] 날짜(A)와 주행후(T) 두 셀을 getValues() 1회로 읽기
-  // A열(1)~T열(20) 범위를 한 번에 읽어 인덱스로 접근
   const rowData = carSh
     .getRange(lastDataRow, 1, 1, CAR_COL.주행후)
     .getValues()[0];
@@ -198,8 +196,8 @@ function saveRecord(payload) {
   const 사용일자 = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
   const 요일 = DAYS[now.getDay()];
   const dateStr = `${now.getMonth() + 1}/${now.getDate()}(${요일})`;
+  const 주차위치 = payload.parking || "";
 
-  // [최적화 2] 마스터 시트 전체 읽기 대신 캐시된 Script Properties 사용
   const carMeta = JSON.parse(
     PropertiesService.getScriptProperties().getProperty("CAR_META_JSON") ||
       "{}",
@@ -225,7 +223,7 @@ function saveRecord(payload) {
   // ── ① WRITE: RAW 시트 백업 저장 ───────────────────────────
   const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
   if (rawSh) {
-    const newRow = new Array(16).fill("");
+    const newRow = new Array(17).fill(""); // 주차위치 추가로 17열
     newRow[COL.ID] = id;
     newRow[COL.차량번호] = 차량번호;
     newRow[COL.차종] = 차종;
@@ -242,32 +240,26 @@ function saveRecord(payload) {
     newRow[COL.비고] = isFirst ? "" : payload.note || "";
     newRow[COL.플래그] = flagStr;
     newRow[COL.타임스탬프] = 타임스탬프;
+    newRow[COL.주차위치] = 주차위치; // 신규
     rawSh.appendRow(newRow);
   }
 
   // ── ② WRITE: 차량 탭 저장 ─────────────────────────────────
   const carSh = ss.getSheetByName(차량번호);
   if (carSh) {
-    // [최적화 3] getLastDataRow는 여기서 1회만 호출 (getPrevOdoData와 중복 제거)
     const lastDataRow = getLastDataRow(carSh);
     const insertRow =
       lastDataRow === -1 ? CONFIG.DATA_START_ROW : lastDataRow + 1;
 
     if (isFirst) {
-      // [최적화 1] 최초 등록: 날짜(A) + 주행후(T) — setValues() 2셀 배치
-      // 두 셀이 연속하지 않아 개별 호출이 불가피하나, flush 전 버퍼에 묶임
       carSh.getRange(insertRow, CAR_COL.날짜).setValue(dateStr);
       carSh.getRange(insertRow, CAR_COL.주행후).setValue(주행후);
     } else {
-      // [최적화 1] 일반 기록: CAR_TOTAL_COLS(44)열짜리 행 배열을 setValues() 1회로 저장
-      // 열 번호가 띄엄띄엄(1,6,10,14,20,26,32,38,44)이므로
-      // 빈 배열을 만들고 각 위치에 값/수식을 주입한 뒤 한 번에 씀
       const row = new Array(CAR_TOTAL_COLS).fill("");
       row[CAR_COL.날짜 - 1] = dateStr;
       row[CAR_COL.부서 - 1] = payload.dept;
       row[CAR_COL.성명 - 1] = payload.name;
       row[CAR_COL.주행후 - 1] = 주행후;
-      // 수식: 주행전 = 바로 윗 행의 T열, 주행거리 = T - N
       row[CAR_COL.주행전 - 1] = `=T${insertRow - 1}`;
       row[CAR_COL.주행거리 - 1] = `=T${insertRow}-N${insertRow}`;
       row[CAR_COL.출퇴근 - 1] = 출퇴근;
@@ -278,19 +270,12 @@ function saveRecord(payload) {
     }
   }
 
-  // [최적화 4] 모든 쓰기가 끝난 후 명시적 flush — 응답 시간 안정화
   SpreadsheetApp.flush();
 
   return { success: true, id, mileage: isFirst ? 0 : 주행거리, flags };
 }
 
 // ── WRITE: 기존 기록 수정 ─────────────────────────────────────────────
-//
-// 처리 순서:
-// 1. RAW 시트에 "수정" 플래그가 붙은 새 행 추가 (원본 ID 이력 보존)
-// 2. 차량 탭의 해당 행(carRowIndex)을 새 데이터로 덮어씀
-//    - 수식(주행전, 주행거리)은 행 번호 기준으로 재설정
-//
 function updateRecord(payload) {
   const ss = getSpreadsheet();
 
@@ -301,8 +286,8 @@ function updateRecord(payload) {
   const 사용구분 = payload.useType;
   const 요일 = DAYS[now.getDay()];
   const carRowIndex = payload.carRowIndex;
+  const 주차위치 = payload.parking || "";
 
-  // [최적화 2] 캐시에서 차종 조회
   const carMeta = JSON.parse(
     PropertiesService.getScriptProperties().getProperty("CAR_META_JSON") ||
       "{}",
@@ -331,7 +316,7 @@ function updateRecord(payload) {
   // ── ① RAW 시트: 수정 이력 행 추가 ────────────────────────
   const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
   if (rawSh) {
-    const newRow = new Array(16).fill("");
+    const newRow = new Array(17).fill(""); // 주차위치 추가로 17열
     newRow[COL.ID] = newId;
     newRow[COL.차량번호] = 차량번호;
     newRow[COL.차종] = 차종;
@@ -348,13 +333,12 @@ function updateRecord(payload) {
     newRow[COL.비고] = payload.note || "";
     newRow[COL.플래그] = flagStr;
     newRow[COL.타임스탬프] = 타임스탬프;
+    newRow[COL.주차위치] = 주차위치; // 신규
     rawSh.appendRow(newRow);
   }
 
-  // ── ② 차량 탭: 해당 행 덮어쓰기 — setValues() 1회로 배치 처리 ──
+  // ── ② 차량 탭: 해당 행 덮어쓰기 ──────────────────────────
   if (carSh && carRowIndex > 0) {
-    // 날짜는 원본 유지 → 날짜 열은 건드리지 않고 나머지만 배열로 구성
-    // 기존 행을 먼저 읽어 날짜값 보존
     const existingDate = carSh.getRange(carRowIndex, CAR_COL.날짜).getValue();
 
     const row = new Array(CAR_TOTAL_COLS).fill("");
@@ -371,7 +355,6 @@ function updateRecord(payload) {
     carSh.getRange(carRowIndex, 1, 1, CAR_TOTAL_COLS).setValues([row]);
   }
 
-  // [최적화 4] flush
   SpreadsheetApp.flush();
 
   return { success: true, newId, mileage: 주행거리, flags };
@@ -407,7 +390,6 @@ function syncAllCarSheets() {
     carMap[car].push(r);
   });
 
-  // [최적화 1 — syncAllCarSheets] 차량별로 행 배열을 모아 setValues() 1회로 일괄 저장
   Object.entries(carMap).forEach(([carNo, rows]) => {
     const carSh = ss.getSheetByName(carNo);
     if (!carSh) {
@@ -415,7 +397,6 @@ function syncAllCarSheets() {
       return;
     }
 
-    // 전체 데이터를 2D 배열로 구성
     const writeData = rows.map((r, idx) => {
       const d = new Date(r[COL.사용일자]);
       const 요일 = DAYS[d.getDay()];
@@ -439,7 +420,6 @@ function syncAllCarSheets() {
       return row;
     });
 
-    // 한 번의 setValues()로 전체 차량 데이터 저장
     carSh
       .getRange(CONFIG.DATA_START_ROW, 1, writeData.length, CAR_TOTAL_COLS)
       .setValues(writeData);
@@ -447,11 +427,10 @@ function syncAllCarSheets() {
     Logger.log(`${carNo}: ${rows.length}건 동기화 완료`);
   });
 
-  // [최적화 4] 복구 완료 후 flush
   SpreadsheetApp.flush();
 }
 
-// ── 마스터 시트 헬퍼 (setupProperties 전용 — 런타임 호출 금지) ──────────
+// ── 마스터 시트 헬퍼 (setupProperties 전용) ──────────────────────────
 function getMasterValue(masterSh, carNo, field) {
   const FIELD_COL = { 차종: 1, 법인명: 3, 사업자번호: 4 };
   const row = masterSh
@@ -471,16 +450,9 @@ function getMasterRow(masterSh, carNo) {
 }
 
 // ── 워밍업 트리거 (5분마다 자동 실행) ───────────────────────────────────
-//
-// 설정 방법 (최초 1회 수동):
-// GAS 편집기 → 트리거 → 추가 → warmup / 시간 기반 / 5분마다
-//
-// 역할: GAS 인스턴스를 웜 상태로 유지해 콜드 스타트(2~5초 지연)를 제거
-// 비용: 스프레드시트를 열기만 하고 아무것도 쓰지 않으므로 할당량 소모 최소
-//
 function warmup() {
   try {
-    getSpreadsheet(); // 인스턴스 초기화만 수행
+    getSpreadsheet();
     Logger.log("warmup OK — " + new Date().toISOString());
   } catch (e) {
     Logger.log("warmup ERROR: " + e.message);
@@ -505,13 +477,11 @@ function setupProperties() {
     JSON.stringify(config.businessTripCars),
   );
 
-  // [최적화 2] 차량-차종 매핑을 Script Properties에 캐싱
-  // → 런타임에서 getMasterValue() 대신 이 캐시를 사용
   const ss = SpreadsheetApp.openById(
     "1sgzKrRD47t8429NpSOiaRJHeRCIBPf98TsqIjlGYU9A",
   );
   const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
-  const masterData = masterSh.getDataRange().getValues().slice(1); // 헤더 제외
+  const masterData = masterSh.getDataRange().getValues().slice(1);
   const carMeta = {};
   masterData.forEach((r) => {
     if (r[0]) {

@@ -316,6 +316,37 @@
         padding-bottom: 8px;
       }
 
+      /* 주차위치 버튼 그리드 */
+      .parking-grid {
+        display: flex;
+        gap: 10px;
+      }
+      .parking-btn {
+        flex: 1;
+        padding: 16px 10px;
+        border-radius: 12px;
+        border: 2px solid var(--border);
+        background: #f8fafc;
+        font-size: 1.0625rem;
+        font-weight: 800;
+        color: var(--text-sub);
+        cursor: pointer;
+        transition: all 0.15s;
+        font-family: inherit;
+        letter-spacing: 0.5px;
+        text-align: center;
+      }
+      .parking-btn .parking-icon {
+        display: block;
+        font-size: 1.375rem;
+        margin-bottom: 4px;
+      }
+      .parking-btn.active {
+        background: var(--accent-light);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
       .toggle-group {
         display: flex;
         gap: 10px;
@@ -526,6 +557,31 @@
         color: var(--warning);
       }
 
+      /* 주차위치 강조 표시 (결과 화면) */
+      .result-parking-card {
+        background: var(--accent-light);
+        border: 2px solid var(--accent-mid);
+        border-radius: var(--radius);
+        padding: 20px;
+        margin-bottom: 16px;
+        text-align: center;
+      }
+      .result-parking-label {
+        font-size: 0.8125rem;
+        font-weight: 700;
+        color: var(--accent);
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        margin-bottom: 6px;
+      }
+      .result-parking-value {
+        font-size: 2.5rem;
+        font-weight: 900;
+        color: var(--accent);
+        letter-spacing: -1px;
+        line-height: 1;
+      }
+
       .result-btn-group {
         display: flex;
         flex-direction: column;
@@ -707,6 +763,44 @@
           </div>
         </div>
 
+        <!-- 주차 위치 섹션 -->
+        <div class="section-label">주차 위치</div>
+
+        <div class="field-card step-pending" id="fieldParkingCard">
+          <div class="field-header">
+            <div class="field-label">
+              <span class="req">*</span>&nbsp;주차 위치
+            </div>
+            <span class="status-icon" id="iconParking">!</span>
+          </div>
+          <div class="parking-grid">
+            <button
+              type="button"
+              class="parking-btn"
+              id="btnB1"
+              onclick="selectParking('B1')"
+            >
+              <span class="parking-icon">🅿️</span>B1
+            </button>
+            <button
+              type="button"
+              class="parking-btn"
+              id="btnB2"
+              onclick="selectParking('B2')"
+            >
+              <span class="parking-icon">🅿️</span>B2
+            </button>
+            <button
+              type="button"
+              class="parking-btn"
+              id="btnB3"
+              onclick="selectParking('B3')"
+            >
+              <span class="parking-icon">🅿️</span>B3
+            </button>
+          </div>
+        </div>
+
         <div style="height: 16px"></div>
       </div>
 
@@ -728,6 +822,15 @@
         <div class="result-title" id="resultTitle">저장 완료!</div>
         <div class="result-desc" id="resultDesc">
           운행 기록이 성공적으로 전송되었습니다.
+        </div>
+        <!-- 주차위치 강조 카드 -->
+        <div
+          class="result-parking-card"
+          id="resultParkingCard"
+          style="display: none"
+        >
+          <div class="result-parking-label">🅿️ 주차 위치</div>
+          <div class="result-parking-value" id="resultParkingValue">—</div>
         </div>
         <div class="result-detail-card" id="resultDetail"></div>
         <div class="result-btn-group">
@@ -751,9 +854,12 @@
       const BUSINESS_TRIP_CARS = _CONFIG.businessTripCars;
       const CLIENTS = _CONFIG.clients || [];
 
+      const PARKING_LOCATIONS = ["B1", "B2", "B3"];
+
       let carNo = document.getElementById("car-raw").textContent.trim();
       let prevOdo = null;
       let selectedType = "일반업무용";
+      let selectedParking = null;
       let isBusinessTrip = false;
       let isFirst = false;
       let isEditMode = false;
@@ -792,6 +898,50 @@
         }
       }
 
+      // 주차위치 선택
+      function selectParking(location) {
+        selectedParking = location;
+        PARKING_LOCATIONS.forEach((loc) => {
+          const btn = document.getElementById("btn" + loc);
+          if (btn) btn.classList.toggle("active", loc === location);
+        });
+        setCardDone("fieldParkingCard", "iconParking");
+        checkSubmitBtn();
+      }
+
+      // 제출 버튼 활성화 조건 통합 체크
+      function checkSubmitBtn() {
+        const odoValid =
+          !document
+            .getElementById("fieldOdoCard")
+            .classList.contains("step-pending") &&
+          document.getElementById("currentOdo").value !== "";
+        const parkingValid = selectedParking !== null;
+
+        // 최초 등록은 주차위치만 필수
+        if (isFirst) {
+          setBtnState(odoValid && parkingValid);
+          return;
+        }
+
+        const fixed = FIXED_USER[carNo];
+        const nameValid = fixed
+          ? true
+          : document.getElementById("selName").value !== "";
+        const noteValid = isBusinessTrip
+          ? (() => {
+              const sel = document.getElementById("noteSelect").value;
+              const direct = document.getElementById("noteDirectInput").value;
+              return (
+                (sel && sel !== "__direct__") ||
+                (sel === "__direct__" && direct)
+              );
+            })()
+          : true;
+
+        setBtnState(odoValid && parkingValid && nameValid && noteValid);
+      }
+
       window.onload = function () {
         const now = new Date();
         const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
@@ -819,6 +969,7 @@
             "새 차량이거나 기록이 없습니다.";
           document.getElementById("firstRecordBanner").style.display = "block";
           document.getElementById("submitBtn").textContent = "초기값 등록하기";
+          // 최초 등록 시 주차위치 제외한 나머지 카드만 비활성화
           [
             "fieldNameCard",
             "fieldTypeCard",
@@ -879,6 +1030,7 @@
         const staffInfo = STAFF.find((s) => s.name === sel.value);
         if (staffInfo) setCardDone("fieldNameCard", "iconName");
         else setCardPending("fieldNameCard", "iconName");
+        checkSubmitBtn();
       }
 
       function validateOdo() {
@@ -887,11 +1039,12 @@
 
         if (!val) {
           setCardPending("fieldOdoCard", "iconOdo");
-          setBtnState(false);
+          checkSubmitBtn();
           return;
         }
         if (isFirst) {
-          setBtnState(true);
+          setCardDone("fieldOdoCard", "iconOdo");
+          checkSubmitBtn();
           return;
         }
 
@@ -910,7 +1063,7 @@
         } else {
           document.getElementById("fieldOdoCard").classList.remove("error");
           setCardDone("fieldOdoCard", "iconOdo");
-          setBtnState(true);
+          checkSubmitBtn();
         }
       }
 
@@ -947,6 +1100,7 @@
           if (val) setCardDone("fieldNoteCard", "iconNote");
           else setCardNeutral("fieldNoteCard", "iconNote");
         }
+        checkSubmitBtn();
       }
 
       function setBtnState(enabled, text) {
@@ -1004,18 +1158,40 @@
         }
         updateNoteStatus();
 
+        // 주차위치 복원
+        if (savedRecord.parking) {
+          selectParking(savedRecord.parking);
+        }
+
         [
           "fieldNameCard",
           "fieldTypeCard",
           "fieldOdoCard",
           "fieldNoteCard",
+          "fieldParkingCard",
         ].forEach((id) => {
           const c = document.getElementById(id);
           if (c) c.classList.remove("disabled");
         });
       }
 
+      function getNote() {
+        if (isBusinessTrip) {
+          const selVal = document.getElementById("noteSelect").value;
+          return selVal === "__direct__"
+            ? document.getElementById("noteDirectInput").value
+            : selVal;
+        }
+        return document.getElementById("noteText").value;
+      }
+
       function submitForm() {
+        // 공통 주차위치 검증
+        if (!selectedParking) {
+          alert("주차 위치를 선택해주세요.");
+          return;
+        }
+
         // ── 수정 모드 전송 ──
         if (isEditMode) {
           const odoVal = Number(document.getElementById("currentOdo").value);
@@ -1032,19 +1208,10 @@
             ? fixed.dept
             : STAFF.find((s) => s.name === name)?.dept;
 
-          let note = "";
-          if (isBusinessTrip) {
-            const selVal = document.getElementById("noteSelect").value;
-            note =
-              selVal === "__direct__"
-                ? document.getElementById("noteDirectInput").value
-                : selVal;
-            if (!note) {
-              alert("방문 거래처를 입력/선택해주세요.");
-              return;
-            }
-          } else {
-            note = document.getElementById("noteText").value;
+          const note = getNote();
+          if (isBusinessTrip && !note) {
+            alert("방문 거래처를 입력/선택해주세요.");
+            return;
           }
 
           if (!name) {
@@ -1067,6 +1234,7 @@
                   useType: selectedType,
                   currentOdo: odoVal,
                   note,
+                  parking: selectedParking,
                 };
                 const mileage =
                   savedRecord.prevOdo !== null
@@ -1080,6 +1248,10 @@
                   "수정 완료!";
                 document.getElementById("resultDesc").textContent =
                   "운행 기록이 성공적으로 수정되었습니다.";
+                document.getElementById("resultParkingValue").textContent =
+                  selectedParking;
+                document.getElementById("resultParkingCard").style.display =
+                  "block";
                 document.getElementById("resultDetail").innerHTML = `
                   <div class="result-row"><span class="label">차량</span><span class="value">${carNo}</span></div>
                   <div class="result-row"><span class="label">운전자</span><span class="value">${dept} ${name}</span></div>
@@ -1107,6 +1279,7 @@
               currentOdo: odoVal,
               prevOdo: savedRecord.prevOdo,
               note,
+              parking: selectedParking,
             });
           return;
         }
@@ -1134,9 +1307,14 @@
                   currentOdo: odoVal,
                   prevOdo: null,
                   note: "",
+                  parking: selectedParking,
                   carRowIndex: data.carRowIndex,
                 };
                 document.getElementById("mainContent").style.display = "none";
+                document.getElementById("resultParkingValue").textContent =
+                  selectedParking;
+                document.getElementById("resultParkingCard").style.display =
+                  "block";
                 document.getElementById("resultDetail").innerHTML = `
                   <div class="result-row"><span class="label">차량</span><span class="value">${carNo}</span></div>
                   <div class="result-row"><span class="label">초기 계기판</span><span class="value">${odoVal.toLocaleString()} km</span></div>
@@ -1155,6 +1333,7 @@
               currentOdo: odoVal,
               prevOdo: null,
               note: "",
+              parking: selectedParking,
             });
           return;
         }
@@ -1168,19 +1347,10 @@
           ? fixed.dept
           : STAFF.find((s) => s.name === name)?.dept;
 
-        let note = "";
-        if (isBusinessTrip) {
-          const selVal = document.getElementById("noteSelect").value;
-          note =
-            selVal === "__direct__"
-              ? document.getElementById("noteDirectInput").value
-              : selVal;
-          if (!note) {
-            alert("방문 거래처를 입력/선택해주세요.");
-            return;
-          }
-        } else {
-          note = document.getElementById("noteText").value;
+        const note = getNote();
+        if (isBusinessTrip && !note) {
+          alert("방문 거래처를 입력/선택해주세요.");
+          return;
         }
 
         if (!name) {
@@ -1204,14 +1374,20 @@
                 currentOdo: odoVal,
                 prevOdo,
                 note,
+                parking: selectedParking,
                 carRowIndex: data.carRowIndex,
               };
               document.getElementById("mainContent").style.display = "none";
+              document.getElementById("resultParkingValue").textContent =
+                selectedParking;
+              document.getElementById("resultParkingCard").style.display =
+                "block";
               document.getElementById("resultDetail").innerHTML = `
                 <div class="result-row"><span class="label">차량</span><span class="value">${carNo}</span></div>
                 <div class="result-row"><span class="label">운전자</span><span class="value">${dept} ${name}</span></div>
                 <div class="result-row"><span class="label">주행 후</span><span class="value">${odoVal.toLocaleString()} km</span></div>
                 <div class="result-row"><span class="label">주행 거리</span><span class="value">${data.mileage} km</span></div>
+                ${note ? `<div class="result-row"><span class="label">비고</span><span class="value">${note}</span></div>` : ""}
               `;
               document.getElementById("resultArea").classList.add("show");
             } else {
@@ -1230,6 +1406,7 @@
             currentOdo: odoVal,
             prevOdo,
             note,
+            parking: selectedParking,
           });
       }
     </script>
