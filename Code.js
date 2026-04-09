@@ -100,6 +100,7 @@ function serveForm(e) {
   const tpl = HtmlService.createTemplateFromFile("ppap_form.html");
   tpl.configJson = JSON.stringify(config);
   tpl.carNo = carNo;
+  tpl.carName = prevOdoData.carName || "";
   tpl.prevOdoJson = JSON.stringify(prevOdoData);
 
   return tpl
