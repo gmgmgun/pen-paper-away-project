@@ -4,16 +4,12 @@
 //
 // [데이터 흐름 원칙]
 // - READ  : 차량 탭에서만 (RAW는 절대 읽지 않음)
+//           단, 주차현황 조회(?mode=where)는 RAW에서 읽음
 // - WRITE : 차량 탭 + RAW 동시 저장 (RAW는 복구용 백업)
-//
-// [성능 최적화 내역]
-// 1. saveRecord() — setValue() 다중 호출 → setValues() 1회로 통합
-// 2. 차종 조회 — getMasterValue() 매번 시트 전체 읽기 → Script Properties 캐시로 대체
-// 3. getLastDataRow() 중복 호출 제거 — saveRecord() 안에서 1회만 호출
-// 4. SpreadsheetApp.flush() 명시적 호출 추가
 //
 // [변경 이력]
 // - 주차위치(parking) 필드 추가: RAW 시트 17번째 열(인덱스 16)에 저장
+// - ?mode=where: 주차현황 조회 페이지 추가
 //
 // ============================================================
 
@@ -42,7 +38,7 @@ const COL = {
   비고: 13,
   플래그: 14,
   타임스탬프: 15,
-  주차위치: 16, // 신규 추가
+  주차위치: 16,
 };
 
 // 차량 탭 열 위치 (1-based)
@@ -58,7 +54,6 @@ const CAR_COL = {
   비고: 44, // AR
 };
 
-// 차량 탭 마지막 열 (비고 열 = 44)
 const CAR_TOTAL_COLS = 44;
 
 function getSpreadsheet() {
@@ -67,32 +62,17 @@ function getSpreadsheet() {
   return SpreadsheetApp.openById(id);
 }
 
+// ── GET 라우터 ────────────────────────────────────────────────────────
 function doGet(e) {
   try {
-    const props = PropertiesService.getScriptProperties();
-    const config = {
-      staff: JSON.parse(props.getProperty("STAFF_JSON") || "[]"),
-      fixedUser: JSON.parse(props.getProperty("FIXED_USER_JSON") || "{}"),
-      businessTripCars: JSON.parse(
-        props.getProperty("BUSINESS_TRIP_CARS_JSON") || "[]",
-      ),
-      clients: JSON.parse(props.getProperty("CLIENTS_JSON") || "[]"),
-    };
+    const mode =
+      e && e.parameter && e.parameter.mode ? e.parameter.mode : "form";
 
-    const carNo = e && e.parameter && e.parameter.car ? e.parameter.car : "";
-    const prevOdoData = carNo
-      ? getPrevOdoData(carNo)
-      : { prevOdo: null, prevDate: null, carName: "" };
+    if (mode === "where") {
+      return serveParkingBoard();
+    }
 
-    const tpl = HtmlService.createTemplateFromFile("ppap_form.html");
-    tpl.configJson = JSON.stringify(config);
-    tpl.carNo = carNo;
-    tpl.prevOdoJson = JSON.stringify(prevOdoData);
-
-    return tpl
-      .evaluate()
-      .setTitle("운행 기록")
-      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    return serveForm(e);
   } catch (err) {
     return ContentService.createTextOutput(
       JSON.stringify({ error: err.message }),
@@ -100,19 +80,128 @@ function doGet(e) {
   }
 }
 
+// ── 운행기록 폼 서빙 ──────────────────────────────────────────────────
+function serveForm(e) {
+  const props = PropertiesService.getScriptProperties();
+  const config = {
+    staff: JSON.parse(props.getProperty("STAFF_JSON") || "[]"),
+    fixedUser: JSON.parse(props.getProperty("FIXED_USER_JSON") || "{}"),
+    businessTripCars: JSON.parse(
+      props.getProperty("BUSINESS_TRIP_CARS_JSON") || "[]",
+    ),
+    clients: JSON.parse(props.getProperty("CLIENTS_JSON") || "[]"),
+  };
+
+  const carNo = e && e.parameter && e.parameter.car ? e.parameter.car : "";
+  const prevOdoData = carNo
+    ? getPrevOdoData(carNo)
+    : { prevOdo: null, prevDate: null, carName: "" };
+
+  const tpl = HtmlService.createTemplateFromFile("ppap_form.html");
+  tpl.configJson = JSON.stringify(config);
+  tpl.carNo = carNo;
+  tpl.prevOdoJson = JSON.stringify(prevOdoData);
+
+  return tpl
+    .evaluate()
+    .setTitle("운행 기록")
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// ── 주차현황 보드 서빙 ────────────────────────────────────────────────
+function serveParkingBoard() {
+  const boardData = getParkingBoard();
+  const now = Utilities.formatDate(new Date(), "Asia/Seoul", "MM/dd HH:mm");
+
+  const tpl = HtmlService.createTemplateFromFile("parking_board.html");
+  tpl.boardJson = JSON.stringify(boardData);
+  tpl.updatedAt = now;
+
+  return tpl
+    .evaluate()
+    .setTitle("주차 현황")
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// ── READ: RAW 시트에서 차량별 최근 주차 현황 조회 ────────────────────
+//
+// 초기값등록 행은 운전자 정보가 없으므로 제외
+// 차량번호별로 타임스탬프 기준 가장 최근 행만 추출
+//
+function getParkingBoard() {
+  const ss = getSpreadsheet();
+  const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
+  if (!rawSh) return [];
+
+  const carMeta = JSON.parse(
+    PropertiesService.getScriptProperties().getProperty("CAR_META_JSON") ||
+      "{}",
+  );
+  const allData = rawSh.getDataRange().getValues().slice(1); // 헤더 제외
+
+  const latestMap = {};
+  allData.forEach((r) => {
+    const carNo = String(r[COL.차량번호]).trim();
+    if (!carNo) return;
+
+    // 초기값등록 행 제외
+    if (String(r[COL.플래그]).includes("초기값등록")) return;
+
+    const ts = r[COL.타임스탬프];
+    if (!latestMap[carNo] || ts > latestMap[carNo].ts) {
+      latestMap[carNo] = {
+        ts,
+        carNo,
+        parking: String(r[COL.주차위치] || "").trim(),
+        name: String(r[COL.성명] || "").trim(),
+        dept: String(r[COL.부서] || "").trim(),
+      };
+    }
+  });
+
+  // 시간 포맷: 오늘이면 "오늘 HH:mm", 어제면 "어제 HH:mm", 그 외 "MM/dd HH:mm"
+  const now = new Date();
+  const todayStr = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = Utilities.formatDate(
+    yesterday,
+    "Asia/Seoul",
+    "yyyy-MM-dd",
+  );
+
+  return Object.values(latestMap).map((item) => {
+    let timeLabel = "—";
+    if (item.ts) {
+      const tsDate = new Date(item.ts);
+      const tsDay = Utilities.formatDate(tsDate, "Asia/Seoul", "yyyy-MM-dd");
+      const tsTime = Utilities.formatDate(tsDate, "Asia/Seoul", "HH:mm");
+      if (tsDay === todayStr) timeLabel = "오늘 " + tsTime;
+      else if (tsDay === yesterdayStr) timeLabel = "어제 " + tsTime;
+      else timeLabel = tsDay.slice(5).replace("-", "/") + " " + tsTime;
+    }
+
+    return {
+      carNo: item.carNo,
+      carName: carMeta[item.carNo]?.차종 || "",
+      parking: item.parking,
+      name: item.dept ? item.dept + " " + item.name : item.name,
+      time: timeLabel,
+    };
+  });
+}
+
 function doPost(e) {
   try {
     const payload = JSON.parse(e.postData.contents);
     if (payload.action === "submit") {
-      const result = saveRecord(payload);
       return ContentService.createTextOutput(
-        JSON.stringify(result),
+        JSON.stringify(saveRecord(payload)),
       ).setMimeType(ContentService.MimeType.JSON);
     }
     if (payload.action === "update") {
-      const result = updateRecord(payload);
       return ContentService.createTextOutput(
-        JSON.stringify(result),
+        JSON.stringify(updateRecord(payload)),
       ).setMimeType(ContentService.MimeType.JSON);
     }
     throw new Error("알 수 없는 action");
@@ -124,7 +213,6 @@ function doPost(e) {
 }
 
 // ── 차량 탭에서 마지막 데이터 행 번호 반환 ────────────────────────────
-// 없으면 -1 반환
 function getLastDataRow(carSh) {
   const lastRow = carSh.getLastRow();
   if (lastRow < CONFIG.DATA_START_ROW) return -1;
@@ -144,7 +232,7 @@ function getLastDataRow(carSh) {
   return lastDataRow;
 }
 
-// ── READ: 직전 계기판 조회 — 차량 탭 T열에서 직접 읽기 ───────────────
+// ── READ: 직전 계기판 조회 ────────────────────────────────────────────
 function getPrevOdoData(carNo) {
   const ss = getSpreadsheet();
   const carMeta = JSON.parse(
@@ -168,28 +256,22 @@ function getPrevOdoData(carNo) {
   if (!prevOdo || Number(prevOdo) === 0)
     return { prevOdo: null, prevDate: null, carName };
 
-  return {
-    prevOdo: Number(prevOdo),
-    prevDate: String(prevDate),
-    carName,
-  };
+  return { prevOdo: Number(prevOdo), prevDate: String(prevDate), carName };
 }
 
 // ── READ: 이상 감지 ───────────────────────────────────────────────────
 function detectAnomalies({ 주행거리 }) {
   const flags = [];
-  if (주행거리 < 0) {
-    flags.push(`역주행감지(${주행거리}km)`);
-  }
+  if (주행거리 < 0) flags.push(`역주행감지(${주행거리}km)`);
   return flags;
 }
 
 // ── WRITE: 운행 기록 저장 ─────────────────────────────────────────────
 function saveRecord(payload) {
   const ss = getSpreadsheet();
-
   const now = new Date();
   const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+
   const 차량번호 = payload.carNo;
   const 주행후 = Number(payload.currentOdo);
   const 사용구분 = payload.useType;
@@ -209,7 +291,6 @@ function saveRecord(payload) {
   const 주행거리 = isFirst ? "" : 주행후 - Number(payload.prevOdo);
   const 출퇴근 = isFirst ? "" : 사용구분 === "출퇴근용" ? 주행거리 : 0;
   const 일반업무 = isFirst ? "" : 사용구분 === "일반업무용" ? 주행거리 : 0;
-
   const flags = isFirst ? ["초기값등록"] : detectAnomalies({ 주행거리 });
 
   const id = Utilities.getUuid();
@@ -220,10 +301,10 @@ function saveRecord(payload) {
     "yyyy-MM-dd HH:mm:ss",
   );
 
-  // ── ① WRITE: RAW 시트 백업 저장 ───────────────────────────
+  // ① RAW 시트 저장
   const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
   if (rawSh) {
-    const newRow = new Array(17).fill(""); // 주차위치 추가로 17열
+    const newRow = new Array(17).fill("");
     newRow[COL.ID] = id;
     newRow[COL.차량번호] = 차량번호;
     newRow[COL.차종] = 차종;
@@ -240,11 +321,11 @@ function saveRecord(payload) {
     newRow[COL.비고] = isFirst ? "" : payload.note || "";
     newRow[COL.플래그] = flagStr;
     newRow[COL.타임스탬프] = 타임스탬프;
-    newRow[COL.주차위치] = 주차위치; // 신규
+    newRow[COL.주차위치] = 주차위치;
     rawSh.appendRow(newRow);
   }
 
-  // ── ② WRITE: 차량 탭 저장 ─────────────────────────────────
+  // ② 차량 탭 저장
   const carSh = ss.getSheetByName(차량번호);
   if (carSh) {
     const lastDataRow = getLastDataRow(carSh);
@@ -265,22 +346,20 @@ function saveRecord(payload) {
       row[CAR_COL.출퇴근 - 1] = 출퇴근;
       row[CAR_COL.일반업무 - 1] = 일반업무;
       row[CAR_COL.비고 - 1] = payload.note || "";
-
       carSh.getRange(insertRow, 1, 1, CAR_TOTAL_COLS).setValues([row]);
     }
   }
 
   SpreadsheetApp.flush();
-
   return { success: true, id, mileage: isFirst ? 0 : 주행거리, flags };
 }
 
 // ── WRITE: 기존 기록 수정 ─────────────────────────────────────────────
 function updateRecord(payload) {
   const ss = getSpreadsheet();
-
   const now = new Date();
   const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+
   const 차량번호 = payload.carNo;
   const 주행후 = Number(payload.currentOdo);
   const 사용구분 = payload.useType;
@@ -299,8 +378,6 @@ function updateRecord(payload) {
   const 주행거리 = 주행후 - 주행전;
   const 출퇴근 = 사용구분 === "출퇴근용" ? 주행거리 : 0;
   const 일반업무 = 사용구분 === "일반업무용" ? 주행거리 : 0;
-
-  const carSh = ss.getSheetByName(차량번호);
   const flags = detectAnomalies({ 주행거리 });
 
   const newId = Utilities.getUuid();
@@ -313,10 +390,10 @@ function updateRecord(payload) {
     "yyyy-MM-dd HH:mm:ss",
   );
 
-  // ── ① RAW 시트: 수정 이력 행 추가 ────────────────────────
+  // ① RAW 시트: 수정 이력 추가
   const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
   if (rawSh) {
-    const newRow = new Array(17).fill(""); // 주차위치 추가로 17열
+    const newRow = new Array(17).fill("");
     newRow[COL.ID] = newId;
     newRow[COL.차량번호] = 차량번호;
     newRow[COL.차종] = 차종;
@@ -333,14 +410,14 @@ function updateRecord(payload) {
     newRow[COL.비고] = payload.note || "";
     newRow[COL.플래그] = flagStr;
     newRow[COL.타임스탬프] = 타임스탬프;
-    newRow[COL.주차위치] = 주차위치; // 신규
+    newRow[COL.주차위치] = 주차위치;
     rawSh.appendRow(newRow);
   }
 
-  // ── ② 차량 탭: 해당 행 덮어쓰기 ──────────────────────────
+  // ② 차량 탭: 해당 행 덮어쓰기
+  const carSh = ss.getSheetByName(차량번호);
   if (carSh && carRowIndex > 0) {
     const existingDate = carSh.getRange(carRowIndex, CAR_COL.날짜).getValue();
-
     const row = new Array(CAR_TOTAL_COLS).fill("");
     row[CAR_COL.날짜 - 1] = existingDate;
     row[CAR_COL.부서 - 1] = payload.dept;
@@ -351,12 +428,10 @@ function updateRecord(payload) {
     row[CAR_COL.출퇴근 - 1] = 출퇴근;
     row[CAR_COL.일반업무 - 1] = 일반업무;
     row[CAR_COL.비고 - 1] = payload.note || "";
-
     carSh.getRange(carRowIndex, 1, 1, CAR_TOTAL_COLS).setValues([row]);
   }
 
   SpreadsheetApp.flush();
-
   return { success: true, newId, mileage: 주행거리, flags };
 }
 
@@ -370,7 +445,6 @@ function syncAllCarSheets() {
   }
 
   const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
-
   const allData = rawSh
     .getDataRange()
     .getValues()
@@ -407,7 +481,6 @@ function syncAllCarSheets() {
       const row = new Array(CAR_TOTAL_COLS).fill("");
       row[CAR_COL.날짜 - 1] = dateStr;
       row[CAR_COL.주행후 - 1] = r[COL.주행후];
-
       if (!isFirst) {
         row[CAR_COL.부서 - 1] = r[COL.부서];
         row[CAR_COL.성명 - 1] = r[COL.성명];
@@ -423,7 +496,6 @@ function syncAllCarSheets() {
     carSh
       .getRange(CONFIG.DATA_START_ROW, 1, writeData.length, CAR_TOTAL_COLS)
       .setValues(writeData);
-
     Logger.log(`${carNo}: ${rows.length}건 동기화 완료`);
   });
 
@@ -449,7 +521,7 @@ function getMasterRow(masterSh, carNo) {
   );
 }
 
-// ── 워밍업 트리거 (5분마다 자동 실행) ───────────────────────────────────
+// ── 워밍업 트리거 (5분마다) ──────────────────────────────────────────
 function warmup() {
   try {
     getSpreadsheet();
@@ -459,7 +531,7 @@ function warmup() {
   }
 }
 
-// ── 초기 설정 (최초 1회 수동 실행) ─────────────────────────────────────
+// ── 초기 설정 (최초 1회 수동 실행) ──────────────────────────────────
 function setupProperties() {
   const config = JSON.parse(
     HtmlService.createHtmlOutputFromFile("config").getContent(),
