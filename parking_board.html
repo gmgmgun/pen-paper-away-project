@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>주차 현황</title>
+    <style>
+      :root {
+        --font-base: 28px;
+        --bg: #f0f2f5;
+        --surface: #ffffff;
+        --border: #e4e7ec;
+        --text-main: #0f172a;
+        --text-sub: #64748b;
+        --accent: #1d4ed8;
+        --accent-light: #eff6ff;
+        --accent-mid: #bfdbfe;
+        --radius: 20px;
+        --radius-sm: 14px;
+        --shadow: 0 2px 12px rgba(0, 0, 0, 0.07);
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      html {
+        font-size: var(--font-base);
+      }
+
+      body {
+        font-family:
+          -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕",
+          sans-serif;
+        background: var(--bg);
+        color: var(--text-main);
+        min-height: 100vh;
+      }
+
+      /* 헤더 */
+      .header {
+        background: var(--accent);
+        padding: 20px 20px 24px;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      .header-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 6px;
+      }
+      .header-badge {
+        background: rgba(255, 255, 255, 0.2);
+        color: #fff;
+        font-size: 0.75rem;
+        font-weight: 700;
+        padding: 4px 12px;
+        border-radius: 100px;
+        letter-spacing: 0.5px;
+      }
+      .header-updated {
+        font-size: 0.75rem;
+        color: rgba(255, 255, 255, 0.65);
+      }
+      .header-title {
+        font-size: 1.5rem;
+        font-weight: 800;
+        color: #fff;
+        letter-spacing: -0.5px;
+      }
+      .header-subtitle {
+        font-size: 0.8125rem;
+        color: rgba(255, 255, 255, 0.65);
+        margin-top: 2px;
+      }
+
+      /* 카드 그리드 */
+      .grid {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        padding: 16px;
+      }
+
+      .car-card {
+        background: var(--surface);
+        border-radius: var(--radius);
+        padding: 28px 24px;
+        box-shadow: var(--shadow);
+        border: 2px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      /* 차량번호 */
+      .car-number {
+        font-size: 2.3rem;
+        font-weight: 800;
+        color: var(--text-main);
+        letter-spacing: 0.5px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .car-number .car-icon {
+        font-size: 1.375rem;
+      }
+
+      /* 주차위치 강조 */
+      .parking-slot {
+        background: var(--accent-light);
+        border: 2px solid var(--accent-mid);
+        border-radius: var(--radius-sm);
+        padding: 28px 10px;
+        text-align: center;
+      }
+      .parking-slot .slot-label {
+        font-size: 0.875rem;
+        font-weight: 700;
+        color: var(--accent);
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .parking-slot .slot-value {
+        font-size: 4rem;
+        font-weight: 900;
+        color: var(--accent);
+        letter-spacing: -2px;
+        line-height: 1;
+      }
+      .parking-slot.unknown {
+        background: #f8fafc;
+        border-color: var(--border);
+      }
+      .parking-slot.unknown .slot-label {
+        color: var(--text-sub);
+      }
+      .parking-slot.unknown .slot-value {
+        font-size: 2rem;
+        color: var(--text-sub);
+        font-weight: 600;
+      }
+
+      /* 운전자 / 시간 정보 */
+      .meta-row {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .meta-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 1rem;
+        color: var(--text-sub);
+        font-weight: 500;
+      }
+      .meta-item .meta-icon {
+        font-size: 1.5rem;
+        flex-shrink: 0;
+      }
+      .meta-item .meta-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--text-main);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* 데이터 없음 */
+      .empty-state {
+        text-align: center;
+        padding: 60px 24px;
+        color: var(--text-sub);
+      }
+      .empty-state .empty-icon {
+        font-size: 3rem;
+        margin-bottom: 12px;
+      }
+      .empty-state .empty-text {
+        font-size: 0.9375rem;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <script id="board-raw" type="application/json">
+      <?!= boardJson ?>
+    </script>
+    <script id="updated-raw" type="text/plain">
+      <?!= updatedAt ?>
+    </script>
+
+    <div class="header">
+      <div class="header-top">
+        <span class="header-badge">🅿️ 주차 현황</span>
+        <span class="header-updated" id="updatedAt"></span>
+      </div>
+      <div class="header-title">차량 위치 보드</div>
+      <div class="header-subtitle">현재 주차된 차량 위치를 확인하세요</div>
+    </div>
+
+    <div class="grid" id="carGrid"></div>
+
+    <script>
+      const board = JSON.parse(
+        document.getElementById("board-raw").textContent,
+      );
+      const updatedAt = document
+        .getElementById("updated-raw")
+        .textContent.trim();
+
+      document.getElementById("updatedAt").textContent = updatedAt
+        ? "기준: " + updatedAt
+        : "";
+
+      const grid = document.getElementById("carGrid");
+
+      if (!board || board.length === 0) {
+        grid.innerHTML = `
+          <div class="empty-state" style="grid-column: 1 / -1">
+            <div class="empty-icon">🚗</div>
+            <div class="empty-text">등록된 차량 데이터가 없습니다.</div>
+          </div>`;
+      } else {
+        board.forEach((car) => {
+          const hasParking = car.parking && car.parking.trim() !== "";
+          const card = document.createElement("div");
+          card.className = "car-card";
+          card.innerHTML = `
+            <div class="car-number">
+              <span class="car-icon">🚗</span>${car.carName ? car.carName + " · " + car.carNo : car.carNo}
+            </div>
+            <div class="parking-slot ${hasParking ? "" : "unknown"}">
+              <div class="slot-label">주차 위치</div>
+              <div class="slot-value">${hasParking ? car.parking : "미기록"}</div>
+            </div>
+            <div class="meta-row">
+              <div class="meta-item">
+                <span class="meta-icon">👤</span>
+                <span class="meta-value">${car.name || "—"}</span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-icon">🕐</span>
+                <span class="meta-value">${car.time || "—"}</span>
+              </div>
+            </div>
+          `;
+          grid.appendChild(card);
+        });
+      }
+    </script>
+  </body>
+</html>

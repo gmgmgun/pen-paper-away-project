@@ -616,6 +616,9 @@
     <script id="car-raw" type="text/plain">
       <?!= carNo ?>
     </script>
+    <script id="carname-raw" type="text/plain">
+      <?!= carName ?>
+    </script>
     <script id="prevodo-raw" type="application/json">
       <?!= prevOdoJson ?>
     </script>
@@ -857,6 +860,7 @@
       const PARKING_LOCATIONS = ["B1", "B2", "B3"];
 
       let carNo = document.getElementById("car-raw").textContent.trim();
+      let carName = document.getElementById("carname-raw").textContent.trim();
       let prevOdo = null;
       let selectedType = "일반업무용";
       let selectedParking = null;
@@ -947,8 +951,9 @@
         const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
         document.getElementById("headerDate").textContent =
           `${now.getMonth() + 1}월 ${now.getDate()}일 (${WEEK[now.getDay()]})`;
-        document.getElementById("headerCar").textContent =
-          carNo || "차량 정보 없음";
+        document.getElementById("headerCar").textContent = carName
+          ? `${carName} · ${carNo}`
+          : carNo || "차량 정보 없음";
 
         const pData = JSON.parse(
           document.getElementById("prevodo-raw").textContent,
