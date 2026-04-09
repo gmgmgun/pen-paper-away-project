@@ -859,15 +859,18 @@
 
       const PARKING_LOCATIONS = ["B1", "B2", "B3"];
 
-      let carNo = document.getElementById("car-raw").textContent.trim();
-      let carName = document.getElementById("carname-raw").textContent.trim();
-      let prevOdo = null;
-      let selectedType = "일반업무용";
-      let selectedParking = null;
-      let isBusinessTrip = false;
-      let isFirst = false;
-      let isEditMode = false;
-      let savedRecord = null;
+      const carNo = document.getElementById("car-raw").textContent.trim();
+      const carName = document.getElementById("carname-raw").textContent.trim();
+
+      const state = {
+        prevOdo: null,
+        selectedType: "일반업무용",
+        selectedParking: null,
+        isBusinessTrip: false,
+        isFirst: false,
+        isEditMode: false,
+        savedRecord: null,
+      };
 
       function setCardDone(cardId, iconId) {
         const card = document.getElementById(cardId);
@@ -904,7 +907,7 @@
 
       // 주차위치 선택
       function selectParking(location) {
-        selectedParking = location;
+        state.selectedParking = location;
         PARKING_LOCATIONS.forEach((loc) => {
           const btn = document.getElementById("btn" + loc);
           if (btn) btn.classList.toggle("active", loc === location);
@@ -920,10 +923,10 @@
             .getElementById("fieldOdoCard")
             .classList.contains("step-pending") &&
           document.getElementById("currentOdo").value !== "";
-        const parkingValid = selectedParking !== null;
+        const parkingValid = state.selectedParking !== null;
 
         // 최초 등록은 주차위치만 필수
-        if (isFirst) {
+        if (state.isFirst) {
           setBtnState(odoValid && parkingValid);
           return;
         }
@@ -932,7 +935,7 @@
         const nameValid = fixed
           ? true
           : document.getElementById("selName").value !== "";
-        const noteValid = isBusinessTrip
+        const noteValid = state.isBusinessTrip
           ? (() => {
               const sel = document.getElementById("noteSelect").value;
               const direct = document.getElementById("noteDirectInput").value;
@@ -960,15 +963,15 @@
         );
 
         if (pData && pData.prevOdo) {
-          prevOdo = Number(pData.prevOdo);
+          state.prevOdo = Number(pData.prevOdo);
           document.getElementById("prevOdoDisplay").textContent =
-            prevOdo.toLocaleString() + " km";
+            state.prevOdo.toLocaleString() + " km";
           document.getElementById("prevOdoSub").textContent = pData.prevDate
             ? "최근 기록: " + pData.prevDate
             : "최근 기록 없음";
-          document.getElementById("currentOdo").value = prevOdo;
+          document.getElementById("currentOdo").value = state.prevOdo;
         } else {
-          isFirst = true;
+          state.isFirst = true;
           document.getElementById("prevOdoDisplay").textContent = "최초 등록";
           document.getElementById("prevOdoSub").textContent =
             "새 차량이거나 기록이 없습니다.";
@@ -989,22 +992,24 @@
           });
         }
 
-        isBusinessTrip = BUSINESS_TRIP_CARS.includes(carNo);
+        state.isBusinessTrip = BUSINESS_TRIP_CARS.includes(carNo);
         const fixed = FIXED_USER[carNo];
         const sel = document.getElementById("selName");
 
         if (fixed) {
           document.getElementById("fieldNameCard").style.display = "none";
         } else {
+          const fragment = document.createDocumentFragment();
           STAFF.forEach((p) => {
-            let opt = document.createElement("option");
+            const opt = document.createElement("option");
             opt.value = p.name;
             opt.textContent = p.name;
-            sel.appendChild(opt);
+            fragment.appendChild(opt);
           });
+          sel.appendChild(fragment);
         }
 
-        if (isBusinessTrip) {
+        if (state.isBusinessTrip) {
           document.getElementById("noteLabel").innerHTML =
             '<span class="req">*</span>&nbsp;방문 거래처';
           document.getElementById("noteGeneral").style.display = "none";
@@ -1012,18 +1017,12 @@
           setCardPending("fieldNoteCard", "iconNote");
 
           const noteSelect = document.getElementById("noteSelect");
-          noteSelect.innerHTML =
-            '<option value="" selected>거래처를 선택하세요</option>';
+          const clientOpts = ['<option value="" selected>거래처를 선택하세요</option>'];
           CLIENTS.forEach((client) => {
-            let opt = document.createElement("option");
-            opt.value = client;
-            opt.textContent = client;
-            noteSelect.appendChild(opt);
+            clientOpts.push(`<option value="${client}">${client}</option>`);
           });
-          let directOpt = document.createElement("option");
-          directOpt.value = "__direct__";
-          directOpt.textContent = "직접 입력하기";
-          noteSelect.appendChild(directOpt);
+          clientOpts.push('<option value="__direct__">직접 입력하기</option>');
+          noteSelect.innerHTML = clientOpts.join("");
         }
 
         selectType("일반업무용");
@@ -1047,13 +1046,13 @@
           checkSubmitBtn();
           return;
         }
-        if (isFirst) {
+        if (state.isFirst) {
           setCardDone("fieldOdoCard", "iconOdo");
           checkSubmitBtn();
           return;
         }
 
-        const baseOdo = isEditMode ? savedRecord.prevOdo : prevOdo;
+        const baseOdo = state.isEditMode ? state.savedRecord.prevOdo : state.prevOdo;
 
         if (val < baseOdo) {
           err.textContent = `직전 기록(${baseOdo.toLocaleString()}km)보다 낮습니다.`;
@@ -1073,7 +1072,7 @@
       }
 
       function selectType(type) {
-        selectedType = type;
+        state.selectedType = type;
         document
           .getElementById("btnCommute")
           .classList.toggle("active", type === "출퇴근용");
@@ -1091,7 +1090,7 @@
       }
 
       function updateNoteStatus() {
-        if (isBusinessTrip) {
+        if (state.isBusinessTrip) {
           const sel = document.getElementById("noteSelect");
           const val =
             sel.value === "__direct__"
@@ -1111,14 +1110,14 @@
       function setBtnState(enabled, text) {
         const btn = document.getElementById("submitBtn");
         btn.disabled = !enabled;
-        if (!isFirst)
+        if (!state.isFirst)
           btn.textContent =
-            text || (isEditMode ? "수정 저장하기" : "기록 저장하기");
+            text || (state.isEditMode ? "수정 저장하기" : "기록 저장하기");
       }
 
       function enterEditMode() {
-        if (!savedRecord) return;
-        isEditMode = true;
+        if (!state.savedRecord) return;
+        state.isEditMode = true;
 
         document.getElementById("resultArea").classList.remove("show");
         document.getElementById("mainContent").style.display = "block";
@@ -1133,39 +1132,39 @@
         btn.textContent = "수정 저장하기";
         btn.disabled = false;
 
-        if (savedRecord.prevOdo !== null) {
+        if (state.savedRecord.prevOdo !== null) {
           document.getElementById("prevOdoDisplay").textContent =
-            savedRecord.prevOdo.toLocaleString() + " km";
+            state.savedRecord.prevOdo.toLocaleString() + " km";
           document.getElementById("prevOdoSub").textContent = "원본 기록 기준";
         }
 
         const fixed = FIXED_USER[carNo];
-        if (!fixed && savedRecord.name) {
-          document.getElementById("selName").value = savedRecord.name;
+        if (!fixed && state.savedRecord.name) {
+          document.getElementById("selName").value = state.savedRecord.name;
           setCardDone("fieldNameCard", "iconName");
         }
 
-        selectType(savedRecord.useType || "일반업무용");
-        document.getElementById("currentOdo").value = savedRecord.currentOdo;
+        selectType(state.savedRecord.useType || "일반업무용");
+        document.getElementById("currentOdo").value = state.savedRecord.currentOdo;
         setCardDone("fieldOdoCard", "iconOdo");
 
-        if (isBusinessTrip) {
+        if (state.isBusinessTrip) {
           const noteSelect = document.getElementById("noteSelect");
-          if (CLIENTS.includes(savedRecord.note)) {
-            noteSelect.value = savedRecord.note;
-          } else if (savedRecord.note) {
+          if (CLIENTS.includes(state.savedRecord.note)) {
+            noteSelect.value = state.savedRecord.note;
+          } else if (state.savedRecord.note) {
             noteSelect.value = "__direct__";
             document.getElementById("noteDirectInput").style.display = "block";
-            document.getElementById("noteDirectInput").value = savedRecord.note;
+            document.getElementById("noteDirectInput").value = state.savedRecord.note;
           }
         } else {
-          document.getElementById("noteText").value = savedRecord.note || "";
+          document.getElementById("noteText").value = state.savedRecord.note || "";
         }
         updateNoteStatus();
 
         // 주차위치 복원
-        if (savedRecord.parking) {
-          selectParking(savedRecord.parking);
+        if (state.savedRecord.parking) {
+          selectParking(state.savedRecord.parking);
         }
 
         [
@@ -1181,7 +1180,7 @@
       }
 
       function getNote() {
-        if (isBusinessTrip) {
+        if (state.isBusinessTrip) {
           const selVal = document.getElementById("noteSelect").value;
           return selVal === "__direct__"
             ? document.getElementById("noteDirectInput").value
@@ -1192,13 +1191,13 @@
 
       function submitForm() {
         // 공통 주차위치 검증
-        if (!selectedParking) {
+        if (!state.selectedParking) {
           alert("주차 위치를 선택해주세요.");
           return;
         }
 
         // ── 수정 모드 전송 ──
-        if (isEditMode) {
+        if (state.isEditMode) {
           const odoVal = Number(document.getElementById("currentOdo").value);
           if (!odoVal) {
             alert("계기판 수치를 입력해주세요.");
@@ -1214,7 +1213,7 @@
             : STAFF.find((s) => s.name === name)?.dept;
 
           const note = getNote();
-          if (isBusinessTrip && !note) {
+          if (state.isBusinessTrip && !note) {
             alert("방문 거래처를 입력/선택해주세요.");
             return;
           }
@@ -1231,19 +1230,19 @@
             .withSuccessHandler((data) => {
               document.getElementById("overlay").classList.remove("show");
               if (data.success) {
-                savedRecord = {
-                  ...savedRecord,
+                state.savedRecord = {
+                  ...state.savedRecord,
                   id: data.newId,
                   name,
                   dept,
-                  useType: selectedType,
+                  useType: state.selectedType,
                   currentOdo: odoVal,
                   note,
-                  parking: selectedParking,
+                  parking: state.selectedParking,
                 };
                 const mileage =
-                  savedRecord.prevOdo !== null
-                    ? odoVal - savedRecord.prevOdo
+                  state.savedRecord.prevOdo !== null
+                    ? odoVal - state.savedRecord.prevOdo
                     : 0;
 
                 document.getElementById("mainContent").style.display = "none";
@@ -1254,7 +1253,7 @@
                 document.getElementById("resultDesc").textContent =
                   "운행 기록이 성공적으로 수정되었습니다.";
                 document.getElementById("resultParkingValue").textContent =
-                  selectedParking;
+                  state.selectedParking;
                 document.getElementById("resultParkingCard").style.display =
                   "block";
                 document.getElementById("resultDetail").innerHTML = `
@@ -1265,7 +1264,7 @@
                   ${note ? `<div class="result-row"><span class="label">비고</span><span class="value">${note}</span></div>` : ""}
                 `;
                 document.getElementById("resultArea").classList.add("show");
-                isEditMode = false;
+                state.isEditMode = false;
               } else {
                 alert("수정 실패: " + data.message);
               }
@@ -1275,16 +1274,16 @@
               alert("오류 발생: " + err.message);
             })
             .updateRecord({
-              originalId: savedRecord.id,
-              carRowIndex: savedRecord.carRowIndex,
+              originalId: state.savedRecord.id,
+              carRowIndex: state.savedRecord.carRowIndex,
               carNo,
               name,
               dept,
-              useType: selectedType,
+              useType: state.selectedType,
               currentOdo: odoVal,
-              prevOdo: savedRecord.prevOdo,
+              prevOdo: state.savedRecord.prevOdo,
               note,
-              parking: selectedParking,
+              parking: state.selectedParking,
             });
           return;
         }
@@ -1296,14 +1295,14 @@
           return;
         }
 
-        if (isFirst) {
+        if (state.isFirst) {
           document.getElementById("overlayText").textContent = "저장 중...";
           document.getElementById("overlay").classList.add("show");
           google.script.run
             .withSuccessHandler((data) => {
               document.getElementById("overlay").classList.remove("show");
               if (data.success) {
-                savedRecord = {
+                state.savedRecord = {
                   id: data.id,
                   carNo,
                   name: "",
@@ -1312,12 +1311,12 @@
                   currentOdo: odoVal,
                   prevOdo: null,
                   note: "",
-                  parking: selectedParking,
+                  parking: state.selectedParking,
                   carRowIndex: data.carRowIndex,
                 };
                 document.getElementById("mainContent").style.display = "none";
                 document.getElementById("resultParkingValue").textContent =
-                  selectedParking;
+                  state.selectedParking;
                 document.getElementById("resultParkingCard").style.display =
                   "block";
                 document.getElementById("resultDetail").innerHTML = `
@@ -1338,7 +1337,7 @@
               currentOdo: odoVal,
               prevOdo: null,
               note: "",
-              parking: selectedParking,
+              parking: state.selectedParking,
             });
           return;
         }
@@ -1353,7 +1352,7 @@
           : STAFF.find((s) => s.name === name)?.dept;
 
         const note = getNote();
-        if (isBusinessTrip && !note) {
+        if (state.isBusinessTrip && !note) {
           alert("방문 거래처를 입력/선택해주세요.");
           return;
         }
@@ -1370,21 +1369,21 @@
           .withSuccessHandler((data) => {
             document.getElementById("overlay").classList.remove("show");
             if (data.success) {
-              savedRecord = {
+              state.savedRecord = {
                 id: data.id,
                 carNo,
                 name,
                 dept,
-                useType: selectedType,
+                useType: state.selectedType,
                 currentOdo: odoVal,
-                prevOdo,
+                prevOdo: state.prevOdo,
                 note,
-                parking: selectedParking,
+                parking: state.selectedParking,
                 carRowIndex: data.carRowIndex,
               };
               document.getElementById("mainContent").style.display = "none";
               document.getElementById("resultParkingValue").textContent =
-                selectedParking;
+                state.selectedParking;
               document.getElementById("resultParkingCard").style.display =
                 "block";
               document.getElementById("resultDetail").innerHTML = `
@@ -1407,11 +1406,11 @@
             carNo,
             name,
             dept,
-            useType: selectedType,
+            useType: state.selectedType,
             currentOdo: odoVal,
-            prevOdo,
+            prevOdo: state.prevOdo,
             note,
-            parking: selectedParking,
+            parking: state.selectedParking,
           });
       }
     </script>

@@ -62,6 +62,21 @@ function getSpreadsheet() {
   return SpreadsheetApp.openById(id);
 }
 
+// ── 스크립트 속성 한 번에 가져오기 ──────────────────────────────────────
+function getAllScriptProps() {
+  return PropertiesService.getScriptProperties().getProperties();
+}
+
+// ── 날짜 포맷 헬퍼 ────────────────────────────────────────────────────
+function getFormattedDate(date) {
+  date = date || new Date();
+  const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+  const 사용일자 = Utilities.formatDate(date, "Asia/Seoul", "yyyy-MM-dd");
+  const 요일 = DAYS[date.getDay()];
+  const dateStr = `${date.getMonth() + 1}/${date.getDate()}(${요일})`;
+  return { 사용일자, 요일, dateStr };
+}
+
 // ── GET 라우터 ────────────────────────────────────────────────────────
 function doGet(e) {
   try {
@@ -82,14 +97,12 @@ function doGet(e) {
 
 // ── 운행기록 폼 서빙 ──────────────────────────────────────────────────
 function serveForm(e) {
-  const props = PropertiesService.getScriptProperties();
+  const props = getAllScriptProps();
   const config = {
-    staff: JSON.parse(props.getProperty("STAFF_JSON") || "[]"),
-    fixedUser: JSON.parse(props.getProperty("FIXED_USER_JSON") || "{}"),
-    businessTripCars: JSON.parse(
-      props.getProperty("BUSINESS_TRIP_CARS_JSON") || "[]",
-    ),
-    clients: JSON.parse(props.getProperty("CLIENTS_JSON") || "[]"),
+    staff: JSON.parse(props.STAFF_JSON || "[]"),
+    fixedUser: JSON.parse(props.FIXED_USER_JSON || "{}"),
+    businessTripCars: JSON.parse(props.BUSINESS_TRIP_CARS_JSON || "[]"),
+    clients: JSON.parse(props.CLIENTS_JSON || "[]"),
   };
 
   const carNo = e && e.parameter && e.parameter.car ? e.parameter.car : "";
@@ -130,14 +143,16 @@ function serveParkingBoard() {
 // 차량번호별로 타임스탬프 기준 가장 최근 행만 추출
 //
 function getParkingBoard() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get("parking_board");
+  if (cached) return JSON.parse(cached);
+
   const ss = getSpreadsheet();
   const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
   if (!rawSh) return [];
 
-  const carMeta = JSON.parse(
-    PropertiesService.getScriptProperties().getProperty("CAR_META_JSON") ||
-      "{}",
-  );
+  const props = getAllScriptProps();
+  const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
   const allData = rawSh.getDataRange().getValues().slice(1); // 헤더 제외
 
   const latestMap = {};
@@ -171,7 +186,7 @@ function getParkingBoard() {
     "yyyy-MM-dd",
   );
 
-  return Object.values(latestMap).map((item) => {
+  const result = Object.values(latestMap).map((item) => {
     let timeLabel = "—";
     if (item.ts) {
       const tsDate = new Date(item.ts);
@@ -182,6 +197,63 @@ function getParkingBoard() {
       else timeLabel = tsDay.slice(5).replace("-", "/") + " " + tsTime;
     }
 
+    return {
+      carNo: item.carNo,
+      carName: carMeta[item.carNo]?.차종 || "",
+      parking: item.parking,
+      name: item.dept ? item.dept + " " + item.name : item.name,
+      time: timeLabel,
+    };
+  });
+
+  cache.put("parking_board", JSON.stringify(result), 300); // 5분 TTL
+  return result;
+}
+
+// ── READ: RAW 시트 직접 조회 (캐시 우회, 테스트용) ──────────────────
+function fetchParkingBoardFromRaw() {
+  const ss = getSpreadsheet();
+  const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
+  if (!rawSh) return [];
+
+  const props = getAllScriptProps();
+  const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
+  const allData = rawSh.getDataRange().getValues().slice(1);
+
+  const latestMap = {};
+  allData.forEach((r) => {
+    const carNo = String(r[COL.차량번호]).trim();
+    if (!carNo) return;
+    if (String(r[COL.플래그]).includes("초기값등록")) return;
+
+    const ts = r[COL.타임스탬프];
+    if (!latestMap[carNo] || ts > latestMap[carNo].ts) {
+      latestMap[carNo] = {
+        ts,
+        carNo,
+        parking: String(r[COL.주차위치] || "").trim(),
+        name: String(r[COL.성명] || "").trim(),
+        dept: String(r[COL.부서] || "").trim(),
+      };
+    }
+  });
+
+  const now = new Date();
+  const todayStr = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = Utilities.formatDate(yesterday, "Asia/Seoul", "yyyy-MM-dd");
+
+  return Object.values(latestMap).map((item) => {
+    let timeLabel = "—";
+    if (item.ts) {
+      const tsDate = new Date(item.ts);
+      const tsDay = Utilities.formatDate(tsDate, "Asia/Seoul", "yyyy-MM-dd");
+      const tsTime = Utilities.formatDate(tsDate, "Asia/Seoul", "HH:mm");
+      if (tsDay === todayStr) timeLabel = "오늘 " + tsTime;
+      else if (tsDay === yesterdayStr) timeLabel = "어제 " + tsTime;
+      else timeLabel = tsDay.slice(5).replace("-", "/") + " " + tsTime;
+    }
     return {
       carNo: item.carNo,
       carName: carMeta[item.carNo]?.차종 || "",
@@ -236,10 +308,8 @@ function getLastDataRow(carSh) {
 // ── READ: 직전 계기판 조회 ────────────────────────────────────────────
 function getPrevOdoData(carNo) {
   const ss = getSpreadsheet();
-  const carMeta = JSON.parse(
-    PropertiesService.getScriptProperties().getProperty("CAR_META_JSON") ||
-      "{}",
-  );
+  const props = getAllScriptProps();
+  const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
   const carName = carMeta[carNo]?.차종 || "";
 
   const carSh = ss.getSheetByName(carNo);
@@ -271,20 +341,15 @@ function detectAnomalies({ 주행거리 }) {
 function saveRecord(payload) {
   const ss = getSpreadsheet();
   const now = new Date();
-  const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
   const 차량번호 = payload.carNo;
   const 주행후 = Number(payload.currentOdo);
   const 사용구분 = payload.useType;
-  const 사용일자 = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
-  const 요일 = DAYS[now.getDay()];
-  const dateStr = `${now.getMonth() + 1}/${now.getDate()}(${요일})`;
+  const { 사용일자, 요일, dateStr } = getFormattedDate(now);
   const 주차위치 = payload.parking || "";
 
-  const carMeta = JSON.parse(
-    PropertiesService.getScriptProperties().getProperty("CAR_META_JSON") ||
-      "{}",
-  );
+  const props = getAllScriptProps();
+  const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
   const 차종 = carMeta[차량번호]?.차종 || "";
 
   const isFirst = payload.prevOdo === null;
@@ -323,15 +388,18 @@ function saveRecord(payload) {
     newRow[COL.플래그] = flagStr;
     newRow[COL.타임스탬프] = 타임스탬프;
     newRow[COL.주차위치] = 주차위치;
-    rawSh.appendRow(newRow);
+    const nextRawRow = rawSh.getLastRow() + 1;
+    rawSh.getRange(nextRawRow, 1, 1, newRow.length).setValues([newRow]);
   }
 
   // ② 차량 탭 저장
+  let carRowIndex = -1;
   const carSh = ss.getSheetByName(차량번호);
   if (carSh) {
     const lastDataRow = getLastDataRow(carSh);
     const insertRow =
       lastDataRow === -1 ? CONFIG.DATA_START_ROW : lastDataRow + 1;
+    carRowIndex = insertRow;
 
     if (isFirst) {
       carSh.getRange(insertRow, CAR_COL.날짜).setValue(dateStr);
@@ -351,29 +419,25 @@ function saveRecord(payload) {
     }
   }
 
-  SpreadsheetApp.flush();
-  return { success: true, id, mileage: isFirst ? 0 : 주행거리, flags };
+  CacheService.getScriptCache().remove("parking_board");
+  return { success: true, id, carRowIndex, mileage: isFirst ? 0 : 주행거리, flags };
 }
 
 // ── WRITE: 기존 기록 수정 ─────────────────────────────────────────────
 function updateRecord(payload) {
   const ss = getSpreadsheet();
   const now = new Date();
-  const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
   const 차량번호 = payload.carNo;
   const 주행후 = Number(payload.currentOdo);
   const 사용구분 = payload.useType;
-  const 요일 = DAYS[now.getDay()];
+  const { 사용일자, 요일 } = getFormattedDate(now);
   const carRowIndex = payload.carRowIndex;
   const 주차위치 = payload.parking || "";
 
-  const carMeta = JSON.parse(
-    PropertiesService.getScriptProperties().getProperty("CAR_META_JSON") ||
-      "{}",
-  );
+  const props = getAllScriptProps();
+  const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
   const 차종 = carMeta[차량번호]?.차종 || "";
-  const 사용일자 = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
 
   const 주행전 = Number(payload.prevOdo);
   const 주행거리 = 주행후 - 주행전;
@@ -412,7 +476,8 @@ function updateRecord(payload) {
     newRow[COL.플래그] = flagStr;
     newRow[COL.타임스탬프] = 타임스탬프;
     newRow[COL.주차위치] = 주차위치;
-    rawSh.appendRow(newRow);
+    const nextRawRow = rawSh.getLastRow() + 1;
+    rawSh.getRange(nextRawRow, 1, 1, newRow.length).setValues([newRow]);
   }
 
   // ② 차량 탭: 해당 행 덮어쓰기
@@ -432,7 +497,7 @@ function updateRecord(payload) {
     carSh.getRange(carRowIndex, 1, 1, CAR_TOTAL_COLS).setValues([row]);
   }
 
-  SpreadsheetApp.flush();
+  CacheService.getScriptCache().remove("parking_board");
   return { success: true, newId, mileage: 주행거리, flags };
 }
 
@@ -499,8 +564,6 @@ function syncAllCarSheets() {
       .setValues(writeData);
     Logger.log(`${carNo}: ${rows.length}건 동기화 완료`);
   });
-
-  SpreadsheetApp.flush();
 }
 
 // ── 마스터 시트 헬퍼 (setupProperties 전용) ──────────────────────────
