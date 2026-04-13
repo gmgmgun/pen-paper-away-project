@@ -122,21 +122,6 @@ function serveForm(e) {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-// ── 주차현황 보드 서빙 ────────────────────────────────────────────────
-function serveParkingBoard() {
-  const boardData = getParkingBoard();
-  const now = Utilities.formatDate(new Date(), "Asia/Seoul", "MM/dd HH:mm");
-
-  const tpl = HtmlService.createTemplateFromFile("parking_board.html");
-  tpl.boardJson = JSON.stringify(boardData);
-  tpl.updatedAt = now;
-
-  return tpl
-    .evaluate()
-    .setTitle("주차 현황")
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
-
 // ── READ: RAW 시트에서 차량별 최근 주차 현황 조회 ────────────────────
 //
 // 초기값등록 행은 운전자 정보가 없으므로 제외
@@ -593,6 +578,109 @@ function getMasterRow(masterSh, carNo) {
       .getValues()
       .find((r) => r[0] === carNo) || null
   );
+}
+
+// ── Excel 내보내기 (Drive 저장 + 이메일 발송) ────────────────────────
+//
+// [스크립트 속성 설정 필요]
+// - EXPORT_FOLDER_ID : 저장할 Drive 폴더 ID (없으면 My Drive 루트)
+// - EXPORT_EMAIL     : 발송할 이메일 주소 (없으면 메일 발송 생략)
+//
+// [제외 시트]
+// - RAW_운행일지, 차량_마스터
+//
+// [사용법]
+// setupExportTrigger() 를 1회 수동 실행 → 이후 매월 1일 자정(KST) 자동 실행
+//
+const EXPORT_EXCLUDE_SHEETS = ["RAW_운행일지", "차량_마스터"];
+
+function exportToExcel() {
+  const ss = getSpreadsheet();
+  const dateStr = Utilities.formatDate(new Date(), "Asia/Seoul", "yyyy-MM-dd");
+  const fileName = `운행일지_${dateStr}.xlsx`;
+
+  // ① 제외 시트를 빼고 임시 스프레드시트 생성
+  const tmpSs = SpreadsheetApp.create(`tmp_export_${dateStr}`);
+
+  // 기본으로 생성되는 빈 시트 제거용 플래그
+  let defaultSheetRemoved = false;
+
+  ss.getSheets().forEach((sheet) => {
+    if (EXPORT_EXCLUDE_SHEETS.includes(sheet.getName())) return;
+
+    sheet.copyTo(tmpSs).setName(sheet.getName());
+
+    // 임시 스프레드시트의 기본 빈 시트 삭제 (첫 복사 후 1회)
+    if (!defaultSheetRemoved) {
+      const defaultSheet = tmpSs.getSheets()[0];
+      if (defaultSheet.getName() !== sheet.getName()) {
+        tmpSs.deleteSheet(defaultSheet);
+      }
+      defaultSheetRemoved = true;
+    }
+  });
+
+  // ② Excel blob 생성
+  const exportUrl = `https://docs.google.com/spreadsheets/d/${tmpSs.getId()}/export?format=xlsx`;
+  const response = UrlFetchApp.fetch(exportUrl, {
+    headers: { Authorization: `Bearer ${ScriptApp.getOAuthToken()}` },
+    muteHttpExceptions: true,
+  });
+
+  // ③ 임시 스프레드시트 삭제
+  DriveApp.getFileById(tmpSs.getId()).setTrashed(true);
+
+  if (response.getResponseCode() !== 200) {
+    Logger.log("Excel 내보내기 실패: HTTP " + response.getResponseCode());
+    return;
+  }
+
+  const blob = response.getBlob().setName(fileName);
+
+  // ④ Drive 저장 (같은 날짜 파일은 덮어쓰기)
+  const props = PropertiesService.getScriptProperties();
+  const folderId = props.getProperty("EXPORT_FOLDER_ID");
+  const folder = folderId
+    ? DriveApp.getFolderById(folderId)
+    : DriveApp.getRootFolder();
+
+  const existing = folder.getFilesByName(fileName);
+  if (existing.hasNext()) existing.next().setTrashed(true);
+
+  folder.createFile(blob);
+  Logger.log(`Drive 저장 완료: ${fileName} → ${folder.getName()}`);
+
+  // ⑤ 이메일 발송
+  const email = props.getProperty("EXPORT_EMAIL");
+  if (email) {
+    MailApp.sendEmail({
+      to: email,
+      subject: `[운행일지 백업] ${dateStr}`,
+      body: `${dateStr} 운행일지 Excel 파일을 첨부합니다.`,
+      attachments: [blob],
+    });
+    Logger.log(`이메일 발송 완료: ${email}`);
+  }
+}
+
+// exportToExcel 트리거 등록 (1회 수동 실행)
+function setupExportTrigger() {
+  // 기존 트리거 삭제
+  ScriptApp.getProjectTriggers().forEach((t) => {
+    if (t.getHandlerFunction() === "exportToExcel") {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+
+  // 매월 1일 자정(KST) 실행
+  ScriptApp.newTrigger("exportToExcel")
+    .timeBased()
+    .onMonthDay(1)
+    .atHour(0)
+    .inTimezone("Asia/Seoul")
+    .create();
+
+  Logger.log("Excel 내보내기 트리거 등록 완료 (매월 1일 자정 KST)");
 }
 
 // ── 워밍업 트리거 (5분마다) ──────────────────────────────────────────
