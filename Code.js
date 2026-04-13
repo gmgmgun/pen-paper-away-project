@@ -650,3 +650,22 @@ function setupProperties() {
       "대 캐싱",
   );
 }
+
+// ── 주차현황 보드 서빙 ────────────────────────────────────────────────
+function serveParkingBoard() {
+  const boardData = getParkingBoard();
+  const now = Utilities.formatDate(new Date(), "Asia/Seoul", "MM/dd HH:mm");
+
+  // 현재 웹앱 배포 URL에서 mode 파라미터를 제거한 베이스 URL
+  const baseUrl = ScriptApp.getService().getUrl();
+
+  const tpl = HtmlService.createTemplateFromFile("parking_board.html");
+  tpl.boardJson = JSON.stringify(boardData);
+  tpl.updatedAt = now;
+  tpl.baseUrl = baseUrl;
+
+  return tpl
+    .evaluate()
+    .setTitle("주차 현황")
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}

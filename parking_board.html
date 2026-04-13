@@ -178,6 +178,40 @@
         text-overflow: ellipsis;
       }
 
+      /* 운행일지 기록 버튼 */
+      .record-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        width: 100%;
+        padding: 18px 20px;
+        background: var(--accent-light);
+        border: 2px solid var(--accent-mid);
+        border-radius: var(--radius-sm);
+        color: var(--accent);
+        font-size: 1rem;
+        font-weight: 800;
+        font-family: inherit;
+        letter-spacing: -0.2px;
+        cursor: pointer;
+        text-decoration: none;
+        transition:
+          background 0.15s,
+          border-color 0.15s,
+          transform 0.1s;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .record-btn:active {
+        background: var(--accent-mid);
+        border-color: var(--accent);
+        transform: scale(0.98);
+      }
+      .record-btn .btn-icon {
+        font-size: 1.25rem;
+        flex-shrink: 0;
+      }
+
       /* 데이터 없음 */
       .empty-state {
         text-align: center;
@@ -201,6 +235,9 @@
     <script id="updated-raw" type="text/plain">
       <?!= updatedAt ?>
     </script>
+    <script id="base-url-raw" type="text/plain">
+      <?!= baseUrl ?>
+    </script>
 
     <div class="header">
       <div class="header-top">
@@ -220,6 +257,9 @@
       const updatedAt = document
         .getElementById("updated-raw")
         .textContent.trim();
+      const baseUrl = document
+        .getElementById("base-url-raw")
+        .textContent.trim();
 
       document.getElementById("updatedAt").textContent = updatedAt
         ? "기준: " + updatedAt
@@ -236,6 +276,12 @@
       } else {
         board.forEach((car) => {
           const hasParking = car.parking && car.parking.trim() !== "";
+
+          // 운행일지 폼 URL: 베이스 URL에 차량번호 파라미터 추가
+          const formUrl = baseUrl
+            ? baseUrl + "?car=" + encodeURIComponent(car.carNo)
+            : "?car=" + encodeURIComponent(car.carNo);
+
           const card = document.createElement("div");
           card.className = "car-card";
           card.innerHTML = `
@@ -256,6 +302,9 @@
                 <span class="meta-value">${car.time || "—"}</span>
               </div>
             </div>
+            <a class="record-btn" href="${formUrl}">
+              <span class="btn-icon">📋</span>운행일지 기록하기
+            </a>
           `;
           grid.appendChild(card);
         });
