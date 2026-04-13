@@ -1017,7 +1017,9 @@
           setCardPending("fieldNoteCard", "iconNote");
 
           const noteSelect = document.getElementById("noteSelect");
-          const clientOpts = ['<option value="" selected>거래처를 선택하세요</option>'];
+          const clientOpts = [
+            '<option value="" selected>거래처를 선택하세요</option>',
+          ];
           CLIENTS.forEach((client) => {
             clientOpts.push(`<option value="${client}">${client}</option>`);
           });
@@ -1052,7 +1054,9 @@
           return;
         }
 
-        const baseOdo = state.isEditMode ? state.savedRecord.prevOdo : state.prevOdo;
+        const baseOdo = state.isEditMode
+          ? state.savedRecord.prevOdo
+          : state.prevOdo;
 
         if (val < baseOdo) {
           err.textContent = `직전 기록(${baseOdo.toLocaleString()}km)보다 낮습니다.`;
@@ -1145,7 +1149,8 @@
         }
 
         selectType(state.savedRecord.useType || "일반업무용");
-        document.getElementById("currentOdo").value = state.savedRecord.currentOdo;
+        document.getElementById("currentOdo").value =
+          state.savedRecord.currentOdo;
         setCardDone("fieldOdoCard", "iconOdo");
 
         if (state.isBusinessTrip) {
@@ -1155,10 +1160,12 @@
           } else if (state.savedRecord.note) {
             noteSelect.value = "__direct__";
             document.getElementById("noteDirectInput").style.display = "block";
-            document.getElementById("noteDirectInput").value = state.savedRecord.note;
+            document.getElementById("noteDirectInput").value =
+              state.savedRecord.note;
           }
         } else {
-          document.getElementById("noteText").value = state.savedRecord.note || "";
+          document.getElementById("noteText").value =
+            state.savedRecord.note || "";
         }
         updateNoteStatus();
 

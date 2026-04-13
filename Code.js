@@ -242,7 +242,11 @@ function fetchParkingBoardFromRaw() {
   const todayStr = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = Utilities.formatDate(yesterday, "Asia/Seoul", "yyyy-MM-dd");
+  const yesterdayStr = Utilities.formatDate(
+    yesterday,
+    "Asia/Seoul",
+    "yyyy-MM-dd",
+  );
 
   return Object.values(latestMap).map((item) => {
     let timeLabel = "—";
@@ -420,7 +424,13 @@ function saveRecord(payload) {
   }
 
   CacheService.getScriptCache().remove("parking_board");
-  return { success: true, id, carRowIndex, mileage: isFirst ? 0 : 주행거리, flags };
+  return {
+    success: true,
+    id,
+    carRowIndex,
+    mileage: isFirst ? 0 : 주행거리,
+    flags,
+  };
 }
 
 // ── WRITE: 기존 기록 수정 ─────────────────────────────────────────────
