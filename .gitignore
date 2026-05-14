@@ -2,3 +2,4 @@
 .clasp.json
 *.gs
 config.html
+.claude/
