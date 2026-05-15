@@ -272,7 +272,14 @@ function getPrevOdoData(carNo, props) {
 // ── READ: 이상 감지 ───────────────────────────────────────────────────
 function detectAnomalies({ 주행거리 }) {
   const flags = [];
+  if (!Number.isFinite(주행거리)) {
+    flags.push("주행거리계산오류");
+    return flags;
+  }
   if (주행거리 < 0) flags.push(`역주행감지(${주행거리}km)`);
+  else if (주행거리 === 0) flags.push("0km주행");
+  else if (주행거리 > CONFIG.MAX_DAILY_KM)
+    flags.push(`과다주행(${주행거리}km>${CONFIG.MAX_DAILY_KM})`);
   return flags;
 }
 
@@ -290,7 +297,22 @@ function saveRecord(payload) {
       throw new Error("계기판 값이 유효하지 않습니다.");
     }
     const 사용구분 = payload.useType;
-    const { 사용일자, 요일, dateStr } = getFormattedDate(now);
+
+    // payload.usageDate(yyyy-MM-dd) 가 오면 그 날짜로 운행기록을 작성.
+    // 미래 날짜는 거부. 비어 있으면 현재 시각 사용 (이전 클라이언트 호환).
+    let recordDate = now;
+    if (payload.usageDate) {
+      const todayStr = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
+      if (String(payload.usageDate) > todayStr) {
+        throw new Error("미래 날짜는 입력할 수 없습니다.");
+      }
+      recordDate = Utilities.parseDate(
+        String(payload.usageDate),
+        "Asia/Seoul",
+        "yyyy-MM-dd",
+      );
+    }
+    const { 사용일자, 요일, dateStr } = getFormattedDate(recordDate);
     const 주차위치 = payload.parking || "";
 
     const props = getAllScriptProps();
@@ -687,6 +709,45 @@ function setupWarmupTrigger() {
   ScriptApp.newTrigger("warmup").timeBased().everyMinutes(5).create();
 
   Logger.log("warmup 트리거 등록 완료 (5분마다)");
+}
+
+// ── 일일 차량 탭 재정렬 (과거 날짜 입력으로 어긋난 순서 보정) ─────────
+// 신규 입력은 append 정책이므로, 사용자가 과거 날짜로 등록하면 차량 탭의
+// 행 순서가 시간순과 어긋날 수 있다. RAW를 SSOT로 두고 매일 새벽
+// syncAllCarSheets 로 차량 탭을 날짜순으로 다시 작성한다.
+function dailyResyncCarSheets() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    Logger.log("dailyResyncCarSheets: lock 획득 실패, 건너뜀");
+    return;
+  }
+  try {
+    Logger.log("dailyResyncCarSheets 시작");
+    syncAllCarSheets();
+    Logger.log("dailyResyncCarSheets 완료");
+  } catch (e) {
+    Logger.log("dailyResyncCarSheets ERROR: " + e.message);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// dailyResyncCarSheets 트리거 등록 (1회 수동 실행)
+function setupDailyResyncTrigger() {
+  ScriptApp.getProjectTriggers().forEach((t) => {
+    if (t.getHandlerFunction() === "dailyResyncCarSheets") {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+
+  ScriptApp.newTrigger("dailyResyncCarSheets")
+    .timeBased()
+    .atHour(4)
+    .everyDays(1)
+    .inTimezone("Asia/Seoul")
+    .create();
+
+  Logger.log("dailyResyncCarSheets 트리거 등록 완료 (매일 04:00 KST)");
 }
 
 // ── 초기 설정 (최초 1회 수동 실행) ──────────────────────────────────
