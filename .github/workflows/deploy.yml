@@ -1,0 +1,113 @@
+name: Deploy to Google Apps Script
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "Code.js"
+      - "**/*.html"
+      - "appsscript.json"
+      - ".clasp.json"
+      - ".claspignore"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "배포 대상 환경"
+        required: true
+        default: "test"
+        type: choice
+        options:
+          - "test"
+          - "prod"
+      skip_deploy:
+        description: "push 만 수행하고 deploy 건너뛰기"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+concurrency:
+  group: gas-deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve target environment
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TARGET="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.ref_name }}" = "main" ]; then
+            TARGET="prod"
+          elif [ "${{ github.ref_name }}" = "staging" ]; then
+            TARGET="test"
+          else
+            echo "::error::Unsupported branch: ${{ github.ref_name }}"
+            exit 1
+          fi
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "Resolved environment: $TARGET"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install clasp
+        run: npm install -g @google/clasp@3.3.0
+
+      - name: Write clasp credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          if [ -z "$CLASPRC_JSON" ]; then
+            echo "::error::CLASPRC_JSON secret is not set"
+            exit 1
+          fi
+          printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+          chmod 600 "$HOME/.clasprc.json"
+
+      - name: Override scriptId for test environment
+        if: steps.env.outputs.target == 'test'
+        env:
+          TEST_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID_TEST }}
+        run: |
+          if [ -z "$TEST_SCRIPT_ID" ]; then
+            echo "::error::GAS_SCRIPT_ID_TEST secret is not set"
+            exit 1
+          fi
+          node -e "
+            const fs = require('fs');
+            const c = JSON.parse(fs.readFileSync('.clasp.json', 'utf8'));
+            c.scriptId = process.env.TEST_SCRIPT_ID;
+            fs.writeFileSync('.clasp.json', JSON.stringify(c, null, 2));
+          "
+          echo "Switched .clasp.json to test scriptId"
+          cat .clasp.json
+
+      - name: Push to Apps Script
+        run: clasp push -f
+
+      - name: Deploy new version
+        if: github.event.inputs.skip_deploy != 'true'
+        env:
+          DEPLOYMENT_ID: ${{ steps.env.outputs.target == 'test' && secrets.GAS_DEPLOYMENT_ID_TEST || secrets.GAS_DEPLOYMENT_ID }}
+          TARGET: ${{ steps.env.outputs.target }}
+        run: |
+          if [ -z "$DEPLOYMENT_ID" ]; then
+            echo "::warning::Deployment ID secret 미설정 — push 만 수행하고 deploy 는 건너뜁니다."
+            echo "  (test 환경: GAS_DEPLOYMENT_ID_TEST / prod 환경: GAS_DEPLOYMENT_ID)"
+            exit 0
+          fi
+          clasp deploy \
+            --deploymentId "$DEPLOYMENT_ID" \
+            --description "auto-deploy $TARGET ${GITHUB_SHA::7}"
+          echo "✅ $TARGET 환경 webapp URL 갱신 완료"

@@ -107,7 +107,7 @@ function serveForm(e) {
 
   const carNo = e && e.parameter && e.parameter.car ? e.parameter.car : "";
   const prevOdoData = carNo
-    ? getPrevOdoData(carNo)
+    ? getPrevOdoData(carNo, props)
     : { prevOdo: null, prevDate: null, carName: "" };
 
   const tpl = HtmlService.createTemplateFromFile("ppap_form.html");
@@ -127,11 +127,7 @@ function serveForm(e) {
 // 초기값등록 행은 운전자 정보가 없으므로 제외
 // 차량번호별로 타임스탬프 기준 가장 최근 행만 추출
 //
-function getParkingBoard() {
-  const cache = CacheService.getScriptCache();
-  const cached = cache.get("parking_board");
-  if (cached) return JSON.parse(cached);
-
+function _buildParkingBoard() {
   const ss = getSpreadsheet();
   const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
   if (!rawSh) return [];
@@ -144,14 +140,15 @@ function getParkingBoard() {
   allData.forEach((r) => {
     const carNo = String(r[COL.차량번호]).trim();
     if (!carNo) return;
-
-    // 초기값등록 행 제외
     if (String(r[COL.플래그]).includes("초기값등록")) return;
 
     const ts = r[COL.타임스탬프];
-    if (!latestMap[carNo] || ts > latestMap[carNo].ts) {
+    // 문자열/Date 혼합 대비: getTime() 으로 정규화
+    const tsMs = ts ? new Date(ts).getTime() : 0;
+    if (!latestMap[carNo] || tsMs > latestMap[carNo].tsMs) {
       latestMap[carNo] = {
         ts,
+        tsMs,
         carNo,
         parking: String(r[COL.주차위치] || "").trim(),
         name: String(r[COL.성명] || "").trim(),
@@ -161,68 +158,6 @@ function getParkingBoard() {
   });
 
   // 시간 포맷: 오늘이면 "오늘 HH:mm", 어제면 "어제 HH:mm", 그 외 "MM/dd HH:mm"
-  const now = new Date();
-  const todayStr = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = Utilities.formatDate(
-    yesterday,
-    "Asia/Seoul",
-    "yyyy-MM-dd",
-  );
-
-  const result = Object.values(latestMap).map((item) => {
-    let timeLabel = "—";
-    if (item.ts) {
-      const tsDate = new Date(item.ts);
-      const tsDay = Utilities.formatDate(tsDate, "Asia/Seoul", "yyyy-MM-dd");
-      const tsTime = Utilities.formatDate(tsDate, "Asia/Seoul", "HH:mm");
-      if (tsDay === todayStr) timeLabel = "오늘 " + tsTime;
-      else if (tsDay === yesterdayStr) timeLabel = "어제 " + tsTime;
-      else timeLabel = tsDay.slice(5).replace("-", "/") + " " + tsTime;
-    }
-
-    return {
-      carNo: item.carNo,
-      carName: carMeta[item.carNo]?.차종 || "",
-      parking: item.parking,
-      name: item.dept ? item.dept + " " + item.name : item.name,
-      time: timeLabel,
-    };
-  });
-
-  cache.put("parking_board", JSON.stringify(result), 300); // 5분 TTL
-  return result;
-}
-
-// ── READ: RAW 시트 직접 조회 (캐시 우회, 테스트용) ──────────────────
-function fetchParkingBoardFromRaw() {
-  const ss = getSpreadsheet();
-  const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
-  if (!rawSh) return [];
-
-  const props = getAllScriptProps();
-  const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
-  const allData = rawSh.getDataRange().getValues().slice(1);
-
-  const latestMap = {};
-  allData.forEach((r) => {
-    const carNo = String(r[COL.차량번호]).trim();
-    if (!carNo) return;
-    if (String(r[COL.플래그]).includes("초기값등록")) return;
-
-    const ts = r[COL.타임스탬프];
-    if (!latestMap[carNo] || ts > latestMap[carNo].ts) {
-      latestMap[carNo] = {
-        ts,
-        carNo,
-        parking: String(r[COL.주차위치] || "").trim(),
-        name: String(r[COL.성명] || "").trim(),
-        dept: String(r[COL.부서] || "").trim(),
-      };
-    }
-  });
-
   const now = new Date();
   const todayStr = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
   const yesterday = new Date(now);
@@ -243,6 +178,7 @@ function fetchParkingBoardFromRaw() {
       else if (tsDay === yesterdayStr) timeLabel = "어제 " + tsTime;
       else timeLabel = tsDay.slice(5).replace("-", "/") + " " + tsTime;
     }
+
     return {
       carNo: item.carNo,
       carName: carMeta[item.carNo]?.차종 || "",
@@ -251,6 +187,22 @@ function fetchParkingBoardFromRaw() {
       time: timeLabel,
     };
   });
+}
+
+function getParkingBoard() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get("parking_board");
+  if (cached) return JSON.parse(cached);
+
+  const result = _buildParkingBoard();
+  // writes 시 invalidate 되므로 TTL 길게 (최대 21600초). 30분 사용.
+  cache.put("parking_board", JSON.stringify(result), 1800);
+  return result;
+}
+
+// ── READ: RAW 시트 직접 조회 (캐시 우회, 테스트용) ──────────────────
+function fetchParkingBoardFromRaw() {
+  return _buildParkingBoard();
 }
 
 function doPost(e) {
@@ -275,6 +227,7 @@ function doPost(e) {
 }
 
 // ── 차량 탭에서 마지막 데이터 행 번호 반환 ────────────────────────────
+// A열을 역방향으로 스캔 — 중간 공백 행이 있어도 안전.
 function getLastDataRow(carSh) {
   const lastRow = carSh.getLastRow();
   if (lastRow < CONFIG.DATA_START_ROW) return -1;
@@ -283,22 +236,19 @@ function getLastDataRow(carSh) {
     .getRange(CONFIG.DATA_START_ROW, 1, lastRow - CONFIG.DATA_START_ROW + 1, 1)
     .getValues();
 
-  let lastDataRow = -1;
-  for (let i = 0; i < aCol.length; i++) {
+  for (let i = aCol.length - 1; i >= 0; i--) {
     if (String(aCol[i][0]).trim() !== "") {
-      lastDataRow = CONFIG.DATA_START_ROW + i;
-    } else {
-      break;
+      return CONFIG.DATA_START_ROW + i;
     }
   }
-  return lastDataRow;
+  return -1;
 }
 
 // ── READ: 직전 계기판 조회 ────────────────────────────────────────────
-function getPrevOdoData(carNo) {
+function getPrevOdoData(carNo, props) {
   const ss = getSpreadsheet();
-  const props = getAllScriptProps();
-  const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
+  const _props = props || getAllScriptProps();
+  const carMeta = JSON.parse(_props.CAR_META_JSON || "{}");
   const carName = carMeta[carNo]?.차종 || "";
 
   const carSh = ss.getSheetByName(carNo);
@@ -328,103 +278,147 @@ function detectAnomalies({ 주행거리 }) {
 
 // ── WRITE: 운행 기록 저장 ─────────────────────────────────────────────
 function saveRecord(payload) {
-  const ss = getSpreadsheet();
-  const now = new Date();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const ss = getSpreadsheet();
+    const now = new Date();
 
-  const 차량번호 = payload.carNo;
-  const 주행후 = Number(payload.currentOdo);
-  const 사용구분 = payload.useType;
-  const { 사용일자, 요일, dateStr } = getFormattedDate(now);
-  const 주차위치 = payload.parking || "";
-
-  const props = getAllScriptProps();
-  const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
-  const 차종 = carMeta[차량번호]?.차종 || "";
-
-  const isFirst = payload.prevOdo === null;
-  const 주행전 = isFirst ? "" : Number(payload.prevOdo);
-  const 주행거리 = isFirst ? "" : 주행후 - Number(payload.prevOdo);
-  const 출퇴근 = isFirst ? "" : 사용구분 === "출퇴근용" ? 주행거리 : 0;
-  const 일반업무 = isFirst ? "" : 사용구분 === "일반업무용" ? 주행거리 : 0;
-  const flags = isFirst ? ["초기값등록"] : detectAnomalies({ 주행거리 });
-
-  const id = Utilities.getUuid();
-  const flagStr = flags.length > 0 ? flags.join(" | ") : "정상";
-  const 타임스탬프 = Utilities.formatDate(
-    now,
-    "Asia/Seoul",
-    "yyyy-MM-dd HH:mm:ss",
-  );
-
-  // ① RAW 시트 저장
-  const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
-  if (rawSh) {
-    const newRow = new Array(17).fill("");
-    newRow[COL.ID] = id;
-    newRow[COL.차량번호] = 차량번호;
-    newRow[COL.차종] = 차종;
-    newRow[COL.사용일자] = 사용일자;
-    newRow[COL.요일] = 요일;
-    newRow[COL.부서] = isFirst ? "" : payload.dept;
-    newRow[COL.성명] = isFirst ? "" : payload.name;
-    newRow[COL.주행전] = 주행전;
-    newRow[COL.주행후] = 주행후;
-    newRow[COL.주행거리] = 주행거리;
-    newRow[COL.사용구분] = isFirst ? "" : 사용구분;
-    newRow[COL.출퇴근] = 출퇴근;
-    newRow[COL.일반업무] = 일반업무;
-    newRow[COL.비고] = isFirst ? "" : payload.note || "";
-    newRow[COL.플래그] = flagStr;
-    newRow[COL.타임스탬프] = 타임스탬프;
-    newRow[COL.주차위치] = 주차위치;
-    const nextRawRow = rawSh.getLastRow() + 1;
-    rawSh.getRange(nextRawRow, 1, 1, newRow.length).setValues([newRow]);
-  }
-
-  // ② 차량 탭 저장
-  let carRowIndex = -1;
-  const carSh = ss.getSheetByName(차량번호);
-  if (carSh) {
-    const lastDataRow = getLastDataRow(carSh);
-    const insertRow =
-      lastDataRow === -1 ? CONFIG.DATA_START_ROW : lastDataRow + 1;
-    carRowIndex = insertRow;
-
-    if (isFirst) {
-      carSh.getRange(insertRow, CAR_COL.날짜).setValue(dateStr);
-      carSh.getRange(insertRow, CAR_COL.주행후).setValue(주행후);
-    } else {
-      const row = new Array(CAR_TOTAL_COLS).fill("");
-      row[CAR_COL.날짜 - 1] = dateStr;
-      row[CAR_COL.부서 - 1] = payload.dept;
-      row[CAR_COL.성명 - 1] = payload.name;
-      row[CAR_COL.주행후 - 1] = 주행후;
-      row[CAR_COL.주행전 - 1] = `=T${insertRow - 1}`;
-      row[CAR_COL.주행거리 - 1] = `=T${insertRow}-N${insertRow}`;
-      row[CAR_COL.출퇴근 - 1] = 출퇴근;
-      row[CAR_COL.일반업무 - 1] = 일반업무;
-      row[CAR_COL.비고 - 1] = payload.note || "";
-      carSh.getRange(insertRow, 1, 1, CAR_TOTAL_COLS).setValues([row]);
+    const 차량번호 = payload.carNo;
+    const 주행후 = Number(payload.currentOdo);
+    if (!Number.isFinite(주행후)) {
+      throw new Error("계기판 값이 유효하지 않습니다.");
     }
-  }
+    const 사용구분 = payload.useType;
+    const { 사용일자, 요일, dateStr } = getFormattedDate(now);
+    const 주차위치 = payload.parking || "";
 
-  CacheService.getScriptCache().remove("parking_board");
-  return {
-    success: true,
-    id,
-    carRowIndex,
-    mileage: isFirst ? 0 : 주행거리,
-    flags,
-  };
+    const props = getAllScriptProps();
+    const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
+    const 차종 = carMeta[차량번호]?.차종 || "";
+
+    const isFirst = payload.prevOdo === null;
+    let prevOdoNum = null;
+    if (!isFirst) {
+      prevOdoNum = Number(payload.prevOdo);
+      if (!Number.isFinite(prevOdoNum)) {
+        throw new Error("직전 계기판 값이 유효하지 않습니다.");
+      }
+    }
+    const 주행전 = isFirst ? "" : prevOdoNum;
+    const 주행거리 = isFirst ? "" : 주행후 - prevOdoNum;
+    const 출퇴근 = isFirst ? "" : 사용구분 === "출퇴근용" ? 주행거리 : 0;
+    const 일반업무 = isFirst ? "" : 사용구분 === "일반업무용" ? 주행거리 : 0;
+    const flags = isFirst ? ["초기값등록"] : detectAnomalies({ 주행거리 });
+
+    const id = Utilities.getUuid();
+    const flagStr = flags.length > 0 ? flags.join(" | ") : "정상";
+    const 타임스탬프 = Utilities.formatDate(
+      now,
+      "Asia/Seoul",
+      "yyyy-MM-dd HH:mm:ss",
+    );
+
+    // ① RAW 시트 저장
+    const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
+    if (rawSh) {
+      const newRow = new Array(17).fill("");
+      newRow[COL.ID] = id;
+      newRow[COL.차량번호] = 차량번호;
+      newRow[COL.차종] = 차종;
+      newRow[COL.사용일자] = 사용일자;
+      newRow[COL.요일] = 요일;
+      newRow[COL.부서] = isFirst ? "" : payload.dept;
+      newRow[COL.성명] = isFirst ? "" : payload.name;
+      newRow[COL.주행전] = 주행전;
+      newRow[COL.주행후] = 주행후;
+      newRow[COL.주행거리] = 주행거리;
+      newRow[COL.사용구분] = isFirst ? "" : 사용구분;
+      newRow[COL.출퇴근] = 출퇴근;
+      newRow[COL.일반업무] = 일반업무;
+      newRow[COL.비고] = isFirst ? "" : payload.note || "";
+      newRow[COL.플래그] = flagStr;
+      newRow[COL.타임스탬프] = 타임스탬프;
+      newRow[COL.주차위치] = 주차위치;
+      const nextRawRow = rawSh.getLastRow() + 1;
+      rawSh.getRange(nextRawRow, 1, 1, newRow.length).setValues([newRow]);
+    }
+
+    // ② 차량 탭 저장
+    let carRowIndex = -1;
+    const carSh = ss.getSheetByName(차량번호);
+    if (carSh) {
+      const lastDataRow = getLastDataRow(carSh);
+      const insertRow =
+        lastDataRow === -1 ? CONFIG.DATA_START_ROW : lastDataRow + 1;
+      carRowIndex = insertRow;
+
+      // 첫 행이거나, 차량탭이 비어 있는데 RAW엔 이력이 있는 복구 시나리오:
+      // 직전 행 참조(=T${insertRow-1})가 헤더를 가리키지 않도록 prevOdo를
+      // 리터럴로 기록.
+      const isCarSheetFirstWrite = insertRow === CONFIG.DATA_START_ROW;
+      if (isFirst || isCarSheetFirstWrite) {
+        const row = new Array(CAR_TOTAL_COLS).fill("");
+        row[CAR_COL.날짜 - 1] = dateStr;
+        row[CAR_COL.주행후 - 1] = 주행후;
+        if (!isFirst) {
+          row[CAR_COL.부서 - 1] = payload.dept;
+          row[CAR_COL.성명 - 1] = payload.name;
+          row[CAR_COL.주행전 - 1] = prevOdoNum;
+          row[CAR_COL.주행거리 - 1] = 주행거리;
+          row[CAR_COL.출퇴근 - 1] = 출퇴근;
+          row[CAR_COL.일반업무 - 1] = 일반업무;
+          row[CAR_COL.비고 - 1] = payload.note || "";
+        }
+        carSh.getRange(insertRow, 1, 1, CAR_TOTAL_COLS).setValues([row]);
+      } else {
+        const row = new Array(CAR_TOTAL_COLS).fill("");
+        row[CAR_COL.날짜 - 1] = dateStr;
+        row[CAR_COL.부서 - 1] = payload.dept;
+        row[CAR_COL.성명 - 1] = payload.name;
+        row[CAR_COL.주행후 - 1] = 주행후;
+        row[CAR_COL.주행전 - 1] = `=T${insertRow - 1}`;
+        row[CAR_COL.주행거리 - 1] = `=T${insertRow}-N${insertRow}`;
+        row[CAR_COL.출퇴근 - 1] = 출퇴근;
+        row[CAR_COL.일반업무 - 1] = 일반업무;
+        row[CAR_COL.비고 - 1] = payload.note || "";
+        carSh.getRange(insertRow, 1, 1, CAR_TOTAL_COLS).setValues([row]);
+      }
+    }
+
+    CacheService.getScriptCache().remove("parking_board");
+    return {
+      success: true,
+      id,
+      carRowIndex,
+      mileage: isFirst ? 0 : 주행거리,
+      flags,
+    };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ── WRITE: 기존 기록 수정 ─────────────────────────────────────────────
 function updateRecord(payload) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    return _updateRecordInner(payload);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function _updateRecordInner(payload) {
   const ss = getSpreadsheet();
   const now = new Date();
 
   const 차량번호 = payload.carNo;
   const 주행후 = Number(payload.currentOdo);
+  if (!Number.isFinite(주행후)) {
+    throw new Error("계기판 값이 유효하지 않습니다.");
+  }
   const 사용구분 = payload.useType;
   const { 사용일자, 요일 } = getFormattedDate(now);
   const carRowIndex = payload.carRowIndex;
@@ -435,6 +429,9 @@ function updateRecord(payload) {
   const 차종 = carMeta[차량번호]?.차종 || "";
 
   const 주행전 = Number(payload.prevOdo);
+  if (!Number.isFinite(주행전)) {
+    throw new Error("직전 계기판 값이 유효하지 않습니다.");
+  }
   const 주행거리 = 주행후 - 주행전;
   const 출퇴근 = 사용구분 === "출퇴근용" ? 주행거리 : 0;
   const 일반업무 = 사용구분 === "일반업무용" ? 주행거리 : 0;
@@ -484,8 +481,14 @@ function updateRecord(payload) {
     row[CAR_COL.부서 - 1] = payload.dept;
     row[CAR_COL.성명 - 1] = payload.name;
     row[CAR_COL.주행후 - 1] = 주행후;
-    row[CAR_COL.주행전 - 1] = `=T${carRowIndex - 1}`;
-    row[CAR_COL.주행거리 - 1] = `=T${carRowIndex}-N${carRowIndex}`;
+    // 첫 데이터 행을 수정하는 경우 =T${row-1} 가 헤더를 가리키지 않도록 리터럴 사용
+    if (carRowIndex === CONFIG.DATA_START_ROW) {
+      row[CAR_COL.주행전 - 1] = 주행전;
+      row[CAR_COL.주행거리 - 1] = 주행거리;
+    } else {
+      row[CAR_COL.주행전 - 1] = `=T${carRowIndex - 1}`;
+      row[CAR_COL.주행거리 - 1] = `=T${carRowIndex}-N${carRowIndex}`;
+    }
     row[CAR_COL.출퇴근 - 1] = 출퇴근;
     row[CAR_COL.일반업무 - 1] = 일반업무;
     row[CAR_COL.비고 - 1] = payload.note || "";
@@ -561,25 +564,6 @@ function syncAllCarSheets() {
   });
 }
 
-// ── 마스터 시트 헬퍼 (setupProperties 전용) ──────────────────────────
-function getMasterValue(masterSh, carNo, field) {
-  const FIELD_COL = { 차종: 1, 법인명: 3, 사업자번호: 4 };
-  const row = masterSh
-    .getDataRange()
-    .getValues()
-    .find((r) => r[0] === carNo);
-  return row ? row[FIELD_COL[field]] : "";
-}
-
-function getMasterRow(masterSh, carNo) {
-  return (
-    masterSh
-      .getDataRange()
-      .getValues()
-      .find((r) => r[0] === carNo) || null
-  );
-}
-
 // ── Excel 내보내기 (Drive 저장 + 이메일 발송) ────────────────────────
 //
 // [스크립트 속성 설정 필요]
@@ -601,65 +585,64 @@ function exportToExcel() {
 
   // ① 제외 시트를 빼고 임시 스프레드시트 생성
   const tmpSs = SpreadsheetApp.create(`tmp_export_${dateStr}`);
+  const defaultSheet = tmpSs.getSheets()[0]; // 자동 생성된 빈 시트 핸들
 
-  // 기본으로 생성되는 빈 시트 제거용 플래그
-  let defaultSheetRemoved = false;
-
-  ss.getSheets().forEach((sheet) => {
-    if (EXPORT_EXCLUDE_SHEETS.includes(sheet.getName())) return;
-
-    sheet.copyTo(tmpSs).setName(sheet.getName());
-
-    // 임시 스프레드시트의 기본 빈 시트 삭제 (첫 복사 후 1회)
-    if (!defaultSheetRemoved) {
-      const defaultSheet = tmpSs.getSheets()[0];
-      if (defaultSheet.getName() !== sheet.getName()) {
-        tmpSs.deleteSheet(defaultSheet);
-      }
-      defaultSheetRemoved = true;
-    }
-  });
-
-  // ② Excel blob 생성
-  const exportUrl = `https://docs.google.com/spreadsheets/d/${tmpSs.getId()}/export?format=xlsx`;
-  const response = UrlFetchApp.fetch(exportUrl, {
-    headers: { Authorization: `Bearer ${ScriptApp.getOAuthToken()}` },
-    muteHttpExceptions: true,
-  });
-
-  // ③ 임시 스프레드시트 삭제
-  DriveApp.getFileById(tmpSs.getId()).setTrashed(true);
-
-  if (response.getResponseCode() !== 200) {
-    Logger.log("Excel 내보내기 실패: HTTP " + response.getResponseCode());
-    return;
-  }
-
-  const blob = response.getBlob().setName(fileName);
-
-  // ④ Drive 저장 (같은 날짜 파일은 덮어쓰기)
-  const props = PropertiesService.getScriptProperties();
-  const folderId = props.getProperty("EXPORT_FOLDER_ID");
-  const folder = folderId
-    ? DriveApp.getFolderById(folderId)
-    : DriveApp.getRootFolder();
-
-  const existing = folder.getFilesByName(fileName);
-  if (existing.hasNext()) existing.next().setTrashed(true);
-
-  folder.createFile(blob);
-  Logger.log(`Drive 저장 완료: ${fileName} → ${folder.getName()}`);
-
-  // ⑤ 이메일 발송
-  const email = props.getProperty("EXPORT_EMAIL");
-  if (email) {
-    MailApp.sendEmail({
-      to: email,
-      subject: `[운행일지 백업] ${dateStr}`,
-      body: `${dateStr} 운행일지 Excel 파일을 첨부합니다.`,
-      attachments: [blob],
+  try {
+    ss.getSheets().forEach((sheet) => {
+      if (EXPORT_EXCLUDE_SHEETS.includes(sheet.getName())) return;
+      sheet.copyTo(tmpSs).setName(sheet.getName());
     });
-    Logger.log(`이메일 발송 완료: ${email}`);
+
+    // 기본 빈 시트 삭제 (다른 시트가 하나라도 복사된 경우에만)
+    if (tmpSs.getSheets().length > 1) {
+      tmpSs.deleteSheet(defaultSheet);
+    }
+
+    // ② Excel blob 생성
+    const exportUrl = `https://docs.google.com/spreadsheets/d/${tmpSs.getId()}/export?format=xlsx`;
+    const response = UrlFetchApp.fetch(exportUrl, {
+      headers: { Authorization: `Bearer ${ScriptApp.getOAuthToken()}` },
+      muteHttpExceptions: true,
+    });
+
+    if (response.getResponseCode() !== 200) {
+      Logger.log("Excel 내보내기 실패: HTTP " + response.getResponseCode());
+      return;
+    }
+
+    const blob = response.getBlob().setName(fileName);
+
+    // ③ Drive 저장 (같은 날짜 파일은 덮어쓰기)
+    const props = PropertiesService.getScriptProperties();
+    const folderId = props.getProperty("EXPORT_FOLDER_ID");
+    const folder = folderId
+      ? DriveApp.getFolderById(folderId)
+      : DriveApp.getRootFolder();
+
+    const existing = folder.getFilesByName(fileName);
+    if (existing.hasNext()) existing.next().setTrashed(true);
+
+    folder.createFile(blob);
+    Logger.log(`Drive 저장 완료: ${fileName} → ${folder.getName()}`);
+
+    // ④ 이메일 발송
+    const email = props.getProperty("EXPORT_EMAIL");
+    if (email) {
+      MailApp.sendEmail({
+        to: email,
+        subject: `[운행일지 백업] ${dateStr}`,
+        body: `${dateStr} 운행일지 Excel 파일을 첨부합니다.`,
+        attachments: [blob],
+      });
+      Logger.log(`이메일 발송 완료: ${email}`);
+    }
+  } finally {
+    // 성공/실패 무관 임시 스프레드시트 정리
+    try {
+      DriveApp.getFileById(tmpSs.getId()).setTrashed(true);
+    } catch (e) {
+      Logger.log("임시 파일 삭제 실패: " + e.message);
+    }
   }
 }
 
@@ -693,6 +676,19 @@ function warmup() {
   }
 }
 
+// warmup 트리거 등록 (1회 수동 실행)
+function setupWarmupTrigger() {
+  ScriptApp.getProjectTriggers().forEach((t) => {
+    if (t.getHandlerFunction() === "warmup") {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+
+  ScriptApp.newTrigger("warmup").timeBased().everyMinutes(5).create();
+
+  Logger.log("warmup 트리거 등록 완료 (5분마다)");
+}
+
 // ── 초기 설정 (최초 1회 수동 실행) ──────────────────────────────────
 function setupProperties() {
   const config = JSON.parse(
@@ -700,20 +696,21 @@ function setupProperties() {
   );
   const props = PropertiesService.getScriptProperties();
 
-  props.setProperty(
-    "SPREADSHEET_ID",
-    "1sgzKrRD47t8429NpSOiaRJHeRCIBPf98TsqIjlGYU9A",
-  );
+  // 환경 분리: 테스트 GAS 에서는 사전에 SPREADSHEET_ID 를 세팅해두면
+  // 그 값을 그대로 사용. 비어 있으면 운영 ID 로 폴백.
+  const DEFAULT_PROD_ID = "1sgzKrRD47t8429NpSOiaRJHeRCIBPf98TsqIjlGYU9A";
+  const ssId = props.getProperty("SPREADSHEET_ID") || DEFAULT_PROD_ID;
+  props.setProperty("SPREADSHEET_ID", ssId);
+
   props.setProperty("STAFF_JSON", JSON.stringify(config.staff));
   props.setProperty("FIXED_USER_JSON", JSON.stringify(config.fixedUser));
   props.setProperty(
     "BUSINESS_TRIP_CARS_JSON",
     JSON.stringify(config.businessTripCars),
   );
+  props.setProperty("CLIENTS_JSON", JSON.stringify(config.clients || []));
 
-  const ss = SpreadsheetApp.openById(
-    "1sgzKrRD47t8429NpSOiaRJHeRCIBPf98TsqIjlGYU9A",
-  );
+  const ss = SpreadsheetApp.openById(ssId);
   const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
   const masterData = masterSh.getDataRange().getValues().slice(1);
   const carMeta = {};
