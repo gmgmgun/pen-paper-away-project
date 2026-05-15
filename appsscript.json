@@ -8,6 +8,6 @@
     "access": "ANYONE_ANONYMOUS"
   },
   "executionApi": {
-    "access": "MYSELF"
+    "access": "ANYONE"
   }
 }
