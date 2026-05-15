@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>운행 일지</title>
+    <style>
+      :root {
+        --bg: #f8fafc;
+        --text: #1f2937;
+        --sub: #64748b;
+        --accent: #2563eb;
+        --danger: #dc2626;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+          Pretendard, "Malgun Gothic", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      #frame {
+        display: block;
+        border: 0;
+        width: 100%;
+        height: 100vh;
+      }
+      #loader,
+      #failPanel {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: var(--bg);
+        padding: 24px;
+        text-align: center;
+      }
+      #failPanel {
+        display: none;
+      }
+      .spinner {
+        width: 38px;
+        height: 38px;
+        border: 3px solid #cbd5e1;
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .loader-text {
+        margin-top: 14px;
+        color: var(--sub);
+        font-size: 0.875rem;
+      }
+      .loader-sub {
+        margin-top: 6px;
+        color: #94a3b8;
+        font-size: 0.75rem;
+      }
+      h1 {
+        font-size: 1.125rem;
+        margin: 0 0 12px;
+        color: var(--danger);
+      }
+      p {
+        margin: 0 0 12px;
+        color: var(--sub);
+        font-size: 0.9rem;
+        line-height: 1.5;
+        max-width: 360px;
+      }
+      ol {
+        text-align: left;
+        max-width: 360px;
+        padding-left: 20px;
+        color: var(--text);
+        font-size: 0.9rem;
+        line-height: 1.7;
+      }
+      .links {
+        margin-top: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 100%;
+        max-width: 360px;
+      }
+      .links a {
+        display: block;
+        padding: 12px;
+        background: white;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        text-decoration: none;
+        color: var(--accent);
+        font-size: 0.875rem;
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="loader">
+      <div class="spinner"></div>
+      <div class="loader-text">운행 일지를 불러오는 중…</div>
+      <div class="loader-sub" id="loaderSub"></div>
+    </div>
+
+    <iframe id="frame" style="display: none" referrerpolicy="no-referrer"></iframe>
+
+    <div id="failPanel">
+      <h1>페이지를 열 수 없습니다</h1>
+      <p>
+        Google 다중 계정 환경에서 발생할 수 있는 라우팅 문제입니다. 아래 방법
+        중 하나로 시도해 주세요.
+      </p>
+      <ol>
+        <li>브라우저의 <b>시크릿 / InPrivate 창</b>에서 이 페이지를 다시 엽니다.</li>
+        <li>또는 회사 Google 계정 외 다른 계정에서 로그아웃 후 다시 시도합니다.</li>
+        <li>그래도 안 되면 아래 직접 링크 중 하나를 눌러 보세요.</li>
+      </ol>
+      <div class="links" id="directLinks"></div>
+    </div>
+
+    <script>
+      // ============================================================
+      // PPAP redirect helper
+      //
+      // QR → 이 페이지 → iframe 으로 GAS webapp 시도
+      // 부모창은 GAS form 으로부터 postMessage({type:'ppap-ready'}) 를 받으면
+      // 그 변종으로 정착. 일정 시간 내 못 받으면 다음 변종으로 자동 교체.
+      //
+      // Google 의 다중 계정 URL prefix 자동 삽입(/u/N/) 으로 인한
+      // 깨짐을 우회하기 위한 fallback 체인.
+      // ============================================================
+
+      const DEPLOY = {
+        prod: "AKfycbxb2np8UJ7r5V-M6OKfOLpLq0JLvdoDVstQLpuv7RF9_qDTk3TvVTqjIhgy32RT85_0Tw",
+        test: "AKfycbyr9ca_IYxdH_UYD9y_HcfCTZANKXGG85SeDmDEz3bgsSPwnKmjqhXuJWD3tR4JpGx5QQ",
+      };
+
+      const params = new URLSearchParams(location.search);
+      const env = params.get("env") === "test" ? "test" : "prod";
+      const deployId = DEPLOY[env];
+
+      // 사용자가 가질 수 있는 계정 인덱스 — 보통 0~4 정도면 충분.
+      // 기본 URL(prefix 없음) 을 가장 먼저 시도해 anonymous + 단일 계정 사용자 커버.
+      function buildVariants(id) {
+        const base = "https://script.google.com/macros/";
+        return [
+          `${base}s/${id}/exec`,
+          `${base}u/0/s/${id}/exec`,
+          `${base}u/1/s/${id}/exec`,
+          `${base}u/2/s/${id}/exec`,
+          `${base}u/3/s/${id}/exec`,
+          `${base}u/4/s/${id}/exec`,
+        ];
+      }
+
+      // QR 에서 받아온 query parameter 를 그대로 GAS 로 전달.
+      // 단 'env' 는 라우터 내부용이라 제거.
+      function forwardQuery() {
+        const out = new URLSearchParams();
+        params.forEach((v, k) => {
+          if (k !== "env") out.append(k, v);
+        });
+        const s = out.toString();
+        return s ? `&${s}` : "";
+      }
+
+      const variants = buildVariants(deployId);
+      const queryTail = forwardQuery();
+      const frame = document.getElementById("frame");
+      const loader = document.getElementById("loader");
+      const loaderSub = document.getElementById("loaderSub");
+      const failPanel = document.getElementById("failPanel");
+      const directLinks = document.getElementById("directLinks");
+
+      const ATTEMPT_TIMEOUT_MS = 4500; // 변종당 응답 대기 시간
+      let attemptIdx = -1;
+      let settled = false;
+      let timeoutHandle = null;
+
+      // GAS form 이 부모창에 보내는 ready 신호 수신
+      window.addEventListener("message", (e) => {
+        if (e.origin !== "https://script.google.com") return;
+        if (e.data && e.data.type === "ppap-ready") {
+          settled = true;
+          if (timeoutHandle) clearTimeout(timeoutHandle);
+          loader.style.display = "none";
+          frame.style.display = "block";
+        }
+      });
+
+      function showFailPanel() {
+        loader.style.display = "none";
+        frame.style.display = "none";
+        directLinks.innerHTML = variants
+          .map(
+            (u, i) =>
+              `<a href="${u}${queryTail.startsWith("&") ? "?" + queryTail.slice(1) : ""}" target="_blank" rel="noopener">시도 ${i + 1}: ${u.replace("https://script.google.com", "")}</a>`,
+          )
+          .join("");
+        failPanel.style.display = "flex";
+      }
+
+      function tryNext() {
+        if (settled) return;
+        attemptIdx++;
+        if (attemptIdx >= variants.length) {
+          showFailPanel();
+          return;
+        }
+        const url =
+          variants[attemptIdx] +
+          (queryTail ? `?${queryTail.slice(1)}` : "");
+        loaderSub.textContent = `연결 시도 ${attemptIdx + 1}/${variants.length}…`;
+        frame.src = url;
+        timeoutHandle = setTimeout(tryNext, ATTEMPT_TIMEOUT_MS);
+      }
+
+      tryNext();
+    </script>
+  </body>
+</html>

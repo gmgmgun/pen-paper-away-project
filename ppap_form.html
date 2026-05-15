@@ -970,6 +970,16 @@
       }
 
       window.onload = function () {
+        // iframe 안에서 동작 시(외부 redirect 래퍼) 부모창에 로드 완료 알림.
+        // 부모는 이 신호로 다중 계정 라우팅 fallback 시도를 중단한다.
+        if (window.parent !== window) {
+          try {
+            window.parent.postMessage({ type: "ppap-ready" }, "*");
+          } catch (_) {
+            /* noop */
+          }
+        }
+
         const now = new Date();
         const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
         document.getElementById("headerDate").textContent =
