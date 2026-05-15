@@ -69,6 +69,99 @@ PPAP는 기존의 번거로운 법인 차량 운행 수기 기록 방식을 디�
 
 > ⚠️ `config.json`을 수정한 경우, `clasp push` 후 반드시 `setupProperties()`를 다시 실행해야 합니다.
 
+## 🤖 자동 배포 (GitHub Actions)
+
+브랜치별로 자동 배포되며 운영/테스트 환경이 완전히 분리됩니다.
+
+| 브랜치    | 대상       | 동작                                                          |
+| :-------- | :--------- | :------------------------------------------------------------ |
+| `main`    | 운영 GAS   | `clasp push -f` + 운영 webapp URL 자동 deploy                 |
+| `staging` | 테스트 GAS | scriptId 교체 후 `clasp push -f` + 테스트 webapp URL 자동 deploy |
+| 수동 실행 | 선택       | Actions 탭 → 환경 선택 (deploy 건너뛰기 옵션 제공)            |
+
+> ⚠️ **main 머지 = 즉시 운영 반영.** PR 리뷰가 사실상 마지막 게이트입니다. deploy 를 건너뛰고 push 만 하고 싶다면 PR 머지 대신 수동 실행 (`skip_deploy=true`) 을 사용하세요.
+
+### 환경 셋업 (최초 1회)
+
+#### 1. 운영 인증
+
+로컬에서 `clasp login` 후 `~/.clasprc.json` 내용을 복사:
+
+- macOS/Linux: `cat ~/.clasprc.json`
+- Windows: `type %USERPROFILE%\.clasprc.json`
+
+GitHub repo → **Settings → Secrets and variables → Actions → New repository secret** 에 `CLASPRC_JSON` 으로 등록.
+
+#### 2. 테스트 환경 구축
+
+테스트 환경은 **운영과 완전히 격리된 별도 GAS 프로젝트 + Sheets 사본** 입니다.
+
+1. **Sheets 사본** : Drive 에서 운영 스프레드시트 우클릭 → "사본 만들기" → 이름을 `PPAP 운행일지 (TEST)` 등으로. URL 의 `/d/<ID>/` 에서 **테스트 Sheets ID** 복사.
+2. **테스트 GAS 프로젝트 생성** :
+   - script.google.com 접속 → "새 프로젝트"
+   - 프로젝트 이름을 `PPAP (TEST)` 로 변경
+   - 프로젝트 설정 → **스크립트 ID** 복사
+3. **테스트 GAS 의 시간대 설정** : 프로젝트 설정 → 시간대 `Asia/Seoul`
+4. **테스트 GAS 의 ScriptProperty 사전 세팅** (운영 ID 폴백 방지):
+   - 프로젝트 설정 → 스크립트 속성 → 속성 추가
+   - 키: `SPREADSHEET_ID`, 값: 위에서 복사한 **테스트 Sheets ID**
+5. **첫 webapp 배포** (수동, 1회만):
+   - 테스트 GAS 편집기에서 `setupProperties()` 1회 실행
+   - "배포 관리" → 새 배포 → **웹앱** 유형 → 배포
+   - 받은 **테스트 URL** 메모, **배포 ID** 복사
+6. **GitHub Secret 등록**:
+   - `GAS_SCRIPT_ID_TEST` : 위 2번에서 복사한 테스트 스크립트 ID
+   - `GAS_DEPLOYMENT_ID_TEST` : 위 5번에서 복사한 테스트 배포 ID
+
+이후 `staging` 푸시는 자동으로 push + 같은 URL 에 새 버전 deploy 까지 수행됩니다.
+
+#### 3. 운영용 배포 ID
+
+`GAS_DEPLOYMENT_ID` : 운영 webapp 의 활성 배포 ID. **자동 배포에 필수**.
+
+1. 운영 GAS 편집기 → "배포 관리" → 활성 배포 항목 → **배포 ID** 복사 (`AKfycb...`)
+2. Secret 등록: `GAS_DEPLOYMENT_ID` = 위 값
+
+> Secret 이 비어 있으면 CI 가 push 만 하고 deploy 는 경고 후 건너뜁니다 (실패는 아님).
+
+### 일상 워크플로우
+
+```text
+feature 작업 → staging 푸시
+            ↓ CI 자동
+        테스트 GAS push + 테스트 URL 자동 갱신
+            ↓ 사용자: 테스트 URL 에서 검증
+        OK 확인
+            ↓ PR 생성 → main 머지 (리뷰가 최종 게이트)
+            ↓ CI 자동
+        운영 GAS push + 운영 URL 자동 갱신
+```
+
+### Deploy 만 건너뛰고 싶을 때
+
+코드만 편집기에 올리고 URL 은 그대로 두고 싶을 때 (예: 점진적 배포, 운영 시간대 회피):
+
+1. PR 머지 대신 Actions 탭 → "Run workflow"
+2. environment=prod, **skip_deploy=true** 선택 → 실행
+3. 나중에 deploy 만 원할 때 다시 Run workflow → skip_deploy=false
+
+### 보호 대상 파일
+
+다음 파일은 CI 에 의해 덮어쓰여지지 않도록 `.claspignore` 에 포함되어 있습니다 — 운영/테스트 GAS 편집기에서 각각 직접 관리:
+
+- `config.html` (직원/차량 설정, 민감 정보)
+- `config.json`
+
+> ⚠️ 테스트 GAS 에도 `config.html` 을 별도로 두어야 `setupProperties()` 가 동작합니다. 운영의 `config.html` 을 그대로 복사해 두면 충분.
+
+### 트러블슈팅
+
+- **`CLASPRC_JSON secret is not set`** : secret 등록 누락.
+- **`GAS_SCRIPT_ID_TEST secret is not set`** : staging 푸시 전 테스트 환경 셋업 누락.
+- **`Could not read API credentials`** : clasp 토큰 만료. 로컬에서 `clasp login --no-localhost` 후 secret 재등록.
+- **테스트 GAS 가 운영 Sheets 를 건드림** : 위 2번 4단계(`SPREADSHEET_ID` 사전 세팅)를 생략한 경우. ScriptProperty 확인 후 `setupProperties()` 재실행.
+- **`clasp push -f` 가 일부 파일을 삭제** : 해당 파일을 `.claspignore` 에 추가.
+
 ---
 
 **Developed by Dongmin Lee** _Improving work efficiency through Small but Powerful DX._

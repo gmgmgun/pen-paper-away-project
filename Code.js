@@ -696,10 +696,12 @@ function setupProperties() {
   );
   const props = PropertiesService.getScriptProperties();
 
-  props.setProperty(
-    "SPREADSHEET_ID",
-    "1sgzKrRD47t8429NpSOiaRJHeRCIBPf98TsqIjlGYU9A",
-  );
+  // 환경 분리: 테스트 GAS 에서는 사전에 SPREADSHEET_ID 를 세팅해두면
+  // 그 값을 그대로 사용. 비어 있으면 운영 ID 로 폴백.
+  const DEFAULT_PROD_ID = "1sgzKrRD47t8429NpSOiaRJHeRCIBPf98TsqIjlGYU9A";
+  const ssId = props.getProperty("SPREADSHEET_ID") || DEFAULT_PROD_ID;
+  props.setProperty("SPREADSHEET_ID", ssId);
+
   props.setProperty("STAFF_JSON", JSON.stringify(config.staff));
   props.setProperty("FIXED_USER_JSON", JSON.stringify(config.fixedUser));
   props.setProperty(
@@ -708,9 +710,7 @@ function setupProperties() {
   );
   props.setProperty("CLIENTS_JSON", JSON.stringify(config.clients || []));
 
-  const ss = SpreadsheetApp.openById(
-    "1sgzKrRD47t8429NpSOiaRJHeRCIBPf98TsqIjlGYU9A",
-  );
+  const ss = SpreadsheetApp.openById(ssId);
   const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
   const masterData = masterSh.getDataRange().getValues().slice(1);
   const carMeta = {};
