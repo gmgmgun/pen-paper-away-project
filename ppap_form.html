@@ -257,7 +257,8 @@
       }
 
       select,
-      input[type="text"] {
+      input[type="text"],
+      input[type="date"] {
         width: 100%;
         border: none;
         outline: none;
@@ -268,6 +269,14 @@
         background: transparent;
         appearance: none;
         -webkit-appearance: none;
+      }
+      input[type="date"] {
+        padding: 4px 0;
+      }
+      .date-hint {
+        font-size: 0.75rem;
+        color: var(--text-sub);
+        margin-top: 6px;
       }
       select {
         background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
@@ -680,6 +689,17 @@
 
         <div class="section-label">주행 정보</div>
 
+        <div class="field-card step-done" id="fieldDateCard">
+          <div class="field-header">
+            <div class="field-label">
+              <span class="req">*</span>&nbsp;운행 일자
+            </div>
+            <span class="status-icon" id="iconDate">✓</span>
+          </div>
+          <input type="date" id="usageDate" />
+          <div class="date-hint">오늘이 아닐 때만 변경하세요. 미래 날짜는 입력 불가.</div>
+        </div>
+
         <div class="field-card step-done" id="fieldTypeCard">
           <div class="field-header">
             <div class="field-label">
@@ -954,6 +974,13 @@
         const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
         document.getElementById("headerDate").textContent =
           `${now.getMonth() + 1}월 ${now.getDate()}일 (${WEEK[now.getDay()]})`;
+
+        const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        const dateInput = document.getElementById("usageDate");
+        if (dateInput) {
+          dateInput.value = todayIso;
+          dateInput.max = todayIso;
+        }
         document.getElementById("headerCar").textContent = carName
           ? `${carName} · ${carNo}`
           : carNo || "차량 정보 없음";
@@ -1068,6 +1095,11 @@
           document.getElementById("fieldOdoCard").classList.add("error");
           setCardPending("fieldOdoCard", "iconOdo");
           setBtnState(false, "주행 거리 확인");
+        } else if (val - baseOdo >= 1000) {
+          err.textContent = `직전 기록(${baseOdo.toLocaleString()}km)과 ${(val - baseOdo).toLocaleString()}km 차이가 납니다. 입력 값을 확인해 주세요.`;
+          document.getElementById("fieldOdoCard").classList.add("error");
+          setCardPending("fieldOdoCard", "iconOdo");
+          setBtnState(false, "계기판 확인 필요");
         } else {
           document.getElementById("fieldOdoCard").classList.remove("error");
           setCardDone("fieldOdoCard", "iconOdo");
@@ -1345,6 +1377,7 @@
               prevOdo: null,
               note: "",
               parking: state.selectedParking,
+              usageDate: document.getElementById("usageDate").value,
             });
           return;
         }
@@ -1418,6 +1451,7 @@
             prevOdo: state.prevOdo,
             note,
             parking: state.selectedParking,
+            usageDate: document.getElementById("usageDate").value,
           });
       }
     </script>

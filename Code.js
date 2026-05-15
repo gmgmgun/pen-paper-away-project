@@ -245,17 +245,35 @@ function getLastDataRow(carSh) {
 }
 
 // ── READ: 직전 계기판 조회 ────────────────────────────────────────────
+// 차량별로 결과 캐싱(30분). saveRecord / _updateRecordInner / dailyResyncCarSheets
+// 에서 해당 키를 명시적으로 invalidate 하므로 stale 위험 없음.
+function _prevOdoCacheKey(carNo) {
+  return `prev_odo:${carNo}`;
+}
+
 function getPrevOdoData(carNo, props) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = _prevOdoCacheKey(carNo);
+  const cached = cache.get(cacheKey);
+  if (cached) return JSON.parse(cached);
+
   const ss = getSpreadsheet();
   const _props = props || getAllScriptProps();
   const carMeta = JSON.parse(_props.CAR_META_JSON || "{}");
   const carName = carMeta[carNo]?.차종 || "";
 
+  const empty = { prevOdo: null, prevDate: null, carName };
   const carSh = ss.getSheetByName(carNo);
-  if (!carSh) return { prevOdo: null, prevDate: null, carName };
+  if (!carSh) {
+    cache.put(cacheKey, JSON.stringify(empty), 1800);
+    return empty;
+  }
 
   const lastDataRow = getLastDataRow(carSh);
-  if (lastDataRow === -1) return { prevOdo: null, prevDate: null, carName };
+  if (lastDataRow === -1) {
+    cache.put(cacheKey, JSON.stringify(empty), 1800);
+    return empty;
+  }
 
   const rowData = carSh
     .getRange(lastDataRow, 1, 1, CAR_COL.주행후)
@@ -263,17 +281,12 @@ function getPrevOdoData(carNo, props) {
   const prevOdo = rowData[CAR_COL.주행후 - 1];
   const prevDate = rowData[CAR_COL.날짜 - 1];
 
-  if (!prevOdo || Number(prevOdo) === 0)
-    return { prevOdo: null, prevDate: null, carName };
-
-  return { prevOdo: Number(prevOdo), prevDate: String(prevDate), carName };
-}
-
-// ── READ: 이상 감지 ───────────────────────────────────────────────────
-function detectAnomalies({ 주행거리 }) {
-  const flags = [];
-  if (주행거리 < 0) flags.push(`역주행감지(${주행거리}km)`);
-  return flags;
+  const result =
+    !prevOdo || Number(prevOdo) === 0
+      ? empty
+      : { prevOdo: Number(prevOdo), prevDate: String(prevDate), carName };
+  cache.put(cacheKey, JSON.stringify(result), 1800);
+  return result;
 }
 
 // ── WRITE: 운행 기록 저장 ─────────────────────────────────────────────
@@ -290,7 +303,22 @@ function saveRecord(payload) {
       throw new Error("계기판 값이 유효하지 않습니다.");
     }
     const 사용구분 = payload.useType;
-    const { 사용일자, 요일, dateStr } = getFormattedDate(now);
+
+    // payload.usageDate(yyyy-MM-dd) 가 오면 그 날짜로 운행기록을 작성.
+    // 미래 날짜는 거부. 비어 있으면 현재 시각 사용 (이전 클라이언트 호환).
+    let recordDate = now;
+    if (payload.usageDate) {
+      const todayStr = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
+      if (String(payload.usageDate) > todayStr) {
+        throw new Error("미래 날짜는 입력할 수 없습니다.");
+      }
+      recordDate = Utilities.parseDate(
+        String(payload.usageDate),
+        "Asia/Seoul",
+        "yyyy-MM-dd",
+      );
+    }
+    const { 사용일자, 요일, dateStr } = getFormattedDate(recordDate);
     const 주차위치 = payload.parking || "";
 
     const props = getAllScriptProps();
@@ -309,7 +337,7 @@ function saveRecord(payload) {
     const 주행거리 = isFirst ? "" : 주행후 - prevOdoNum;
     const 출퇴근 = isFirst ? "" : 사용구분 === "출퇴근용" ? 주행거리 : 0;
     const 일반업무 = isFirst ? "" : 사용구분 === "일반업무용" ? 주행거리 : 0;
-    const flags = isFirst ? ["초기값등록"] : detectAnomalies({ 주행거리 });
+    const flags = isFirst ? ["초기값등록"] : [];
 
     const id = Utilities.getUuid();
     const flagStr = flags.length > 0 ? flags.join(" | ") : "정상";
@@ -386,7 +414,9 @@ function saveRecord(payload) {
       }
     }
 
-    CacheService.getScriptCache().remove("parking_board");
+    const cache = CacheService.getScriptCache();
+    cache.remove("parking_board");
+    cache.remove(_prevOdoCacheKey(차량번호));
     return {
       success: true,
       id,
@@ -435,12 +465,10 @@ function _updateRecordInner(payload) {
   const 주행거리 = 주행후 - 주행전;
   const 출퇴근 = 사용구분 === "출퇴근용" ? 주행거리 : 0;
   const 일반업무 = 사용구분 === "일반업무용" ? 주행거리 : 0;
-  const flags = detectAnomalies({ 주행거리 });
+  const flags = [];
 
   const newId = Utilities.getUuid();
-  const flagStr =
-    (flags.length > 0 ? flags.join(" | ") + " | " : "") +
-    `수정됨(원본:${payload.originalId})`;
+  const flagStr = `수정됨(원본:${payload.originalId})`;
   const 타임스탬프 = Utilities.formatDate(
     now,
     "Asia/Seoul",
@@ -495,7 +523,9 @@ function _updateRecordInner(payload) {
     carSh.getRange(carRowIndex, 1, 1, CAR_TOTAL_COLS).setValues([row]);
   }
 
-  CacheService.getScriptCache().remove("parking_board");
+  const cache = CacheService.getScriptCache();
+  cache.remove("parking_board");
+  cache.remove(_prevOdoCacheKey(차량번호));
   return { success: true, newId, mileage: 주행거리, flags };
 }
 
@@ -689,6 +719,56 @@ function setupWarmupTrigger() {
   Logger.log("warmup 트리거 등록 완료 (5분마다)");
 }
 
+// ── 일일 차량 탭 재정렬 (과거 날짜 입력으로 어긋난 순서 보정) ─────────
+// 신규 입력은 append 정책이므로, 사용자가 과거 날짜로 등록하면 차량 탭의
+// 행 순서가 시간순과 어긋날 수 있다. RAW를 SSOT로 두고 매일 새벽
+// syncAllCarSheets 로 차량 탭을 날짜순으로 다시 작성한다.
+function dailyResyncCarSheets() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    Logger.log("dailyResyncCarSheets: lock 획득 실패, 건너뜀");
+    return;
+  }
+  try {
+    Logger.log("dailyResyncCarSheets 시작");
+    syncAllCarSheets();
+
+    // 차량 탭 재정렬로 prev_odo 결과가 바뀔 수 있으므로 차량 캐시 일괄 invalidate.
+    const props = getAllScriptProps();
+    const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
+    const keys = Object.keys(carMeta).map(_prevOdoCacheKey);
+    if (keys.length > 0) {
+      const cache = CacheService.getScriptCache();
+      cache.removeAll(keys);
+      cache.remove("parking_board");
+    }
+
+    Logger.log("dailyResyncCarSheets 완료");
+  } catch (e) {
+    Logger.log("dailyResyncCarSheets ERROR: " + e.message);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// dailyResyncCarSheets 트리거 등록 (1회 수동 실행)
+function setupDailyResyncTrigger() {
+  ScriptApp.getProjectTriggers().forEach((t) => {
+    if (t.getHandlerFunction() === "dailyResyncCarSheets") {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+
+  ScriptApp.newTrigger("dailyResyncCarSheets")
+    .timeBased()
+    .atHour(4)
+    .everyDays(1)
+    .inTimezone("Asia/Seoul")
+    .create();
+
+  Logger.log("dailyResyncCarSheets 트리거 등록 완료 (매일 04:00 KST)");
+}
+
 // ── 초기 설정 (최초 1회 수동 실행) ──────────────────────────────────
 function setupProperties() {
   const config = JSON.parse(
@@ -754,3 +834,4 @@ function serveParkingBoard() {
     .setTitle("주차 현황")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
+
