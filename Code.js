@@ -227,15 +227,18 @@ function doPost(e) {
 }
 
 // ── 차량 탭에서 마지막 데이터 행 번호 반환 ────────────────────────────
-// A열을 역방향으로 스캔 — 중간 공백 행이 있어도 안전.
+// 정상 케이스(=마지막 행이 그대로 데이터 행)는 1셀 read 로 끝낸다.
+// 중간 공백 행이 있을 가능성에 대비해 비어 있으면 A열 전체 역스캔으로 폴백.
 function getLastDataRow(carSh) {
   const lastRow = carSh.getLastRow();
   if (lastRow < CONFIG.DATA_START_ROW) return -1;
 
+  const lastCellA = carSh.getRange(lastRow, 1).getValue();
+  if (String(lastCellA).trim() !== "") return lastRow;
+
   const aCol = carSh
     .getRange(CONFIG.DATA_START_ROW, 1, lastRow - CONFIG.DATA_START_ROW + 1, 1)
     .getValues();
-
   for (let i = aCol.length - 1; i >= 0; i--) {
     if (String(aCol[i][0]).trim() !== "") {
       return CONFIG.DATA_START_ROW + i;
@@ -245,17 +248,35 @@ function getLastDataRow(carSh) {
 }
 
 // ── READ: 직전 계기판 조회 ────────────────────────────────────────────
+// 차량별로 결과 캐싱(30분). saveRecord / _updateRecordInner / dailyResyncCarSheets
+// 에서 해당 키를 명시적으로 invalidate 하므로 stale 위험 없음.
+function _prevOdoCacheKey(carNo) {
+  return `prev_odo:${carNo}`;
+}
+
 function getPrevOdoData(carNo, props) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = _prevOdoCacheKey(carNo);
+  const cached = cache.get(cacheKey);
+  if (cached) return JSON.parse(cached);
+
   const ss = getSpreadsheet();
   const _props = props || getAllScriptProps();
   const carMeta = JSON.parse(_props.CAR_META_JSON || "{}");
   const carName = carMeta[carNo]?.차종 || "";
 
+  const empty = { prevOdo: null, prevDate: null, carName };
   const carSh = ss.getSheetByName(carNo);
-  if (!carSh) return { prevOdo: null, prevDate: null, carName };
+  if (!carSh) {
+    cache.put(cacheKey, JSON.stringify(empty), 1800);
+    return empty;
+  }
 
   const lastDataRow = getLastDataRow(carSh);
-  if (lastDataRow === -1) return { prevOdo: null, prevDate: null, carName };
+  if (lastDataRow === -1) {
+    cache.put(cacheKey, JSON.stringify(empty), 1800);
+    return empty;
+  }
 
   const rowData = carSh
     .getRange(lastDataRow, 1, 1, CAR_COL.주행후)
@@ -263,10 +284,12 @@ function getPrevOdoData(carNo, props) {
   const prevOdo = rowData[CAR_COL.주행후 - 1];
   const prevDate = rowData[CAR_COL.날짜 - 1];
 
-  if (!prevOdo || Number(prevOdo) === 0)
-    return { prevOdo: null, prevDate: null, carName };
-
-  return { prevOdo: Number(prevOdo), prevDate: String(prevDate), carName };
+  const result =
+    !prevOdo || Number(prevOdo) === 0
+      ? empty
+      : { prevOdo: Number(prevOdo), prevDate: String(prevDate), carName };
+  cache.put(cacheKey, JSON.stringify(result), 1800);
+  return result;
 }
 
 // ── WRITE: 운행 기록 저장 ─────────────────────────────────────────────
@@ -394,7 +417,9 @@ function saveRecord(payload) {
       }
     }
 
-    CacheService.getScriptCache().remove("parking_board");
+    const cache = CacheService.getScriptCache();
+    cache.remove("parking_board");
+    cache.remove(_prevOdoCacheKey(차량번호));
     return {
       success: true,
       id,
@@ -501,7 +526,9 @@ function _updateRecordInner(payload) {
     carSh.getRange(carRowIndex, 1, 1, CAR_TOTAL_COLS).setValues([row]);
   }
 
-  CacheService.getScriptCache().remove("parking_board");
+  const cache = CacheService.getScriptCache();
+  cache.remove("parking_board");
+  cache.remove(_prevOdoCacheKey(차량번호));
   return { success: true, newId, mileage: 주행거리, flags };
 }
 
@@ -708,6 +735,17 @@ function dailyResyncCarSheets() {
   try {
     Logger.log("dailyResyncCarSheets 시작");
     syncAllCarSheets();
+
+    // 차량 탭 재정렬로 prev_odo 결과가 바뀔 수 있으므로 차량 캐시 일괄 invalidate.
+    const props = getAllScriptProps();
+    const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
+    const keys = Object.keys(carMeta).map(_prevOdoCacheKey);
+    if (keys.length > 0) {
+      const cache = CacheService.getScriptCache();
+      cache.removeAll(keys);
+      cache.remove("parking_board");
+    }
+
     Logger.log("dailyResyncCarSheets 완료");
   } catch (e) {
     Logger.log("dailyResyncCarSheets ERROR: " + e.message);
