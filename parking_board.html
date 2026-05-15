@@ -274,38 +274,66 @@
             <div class="empty-text">등록된 차량 데이터가 없습니다.</div>
           </div>`;
       } else {
+        const makeEl = (tag, className, text) => {
+          const el = document.createElement(tag);
+          if (className) el.className = className;
+          if (text != null) el.textContent = text;
+          return el;
+        };
+
         board.forEach((car) => {
           const hasParking = car.parking && car.parking.trim() !== "";
 
           // 운행일지 폼 URL: 베이스 URL에 차량번호 파라미터 추가
-          const formUrl = baseUrl
-            ? baseUrl + "?car=" + encodeURIComponent(car.carNo)
-            : "?car=" + encodeURIComponent(car.carNo);
+          const formUrl =
+            (baseUrl || "") + "?car=" + encodeURIComponent(car.carNo);
 
-          const card = document.createElement("div");
-          card.className = "car-card";
-          card.innerHTML = `
-            <div class="car-number">
-              <span class="car-icon">🚗</span>${car.carName ? car.carName + " · " + car.carNo : car.carNo}
-            </div>
-            <div class="parking-slot ${hasParking ? "" : "unknown"}">
-              <div class="slot-label">주차 위치</div>
-              <div class="slot-value">${hasParking ? car.parking : "미기록"}</div>
-            </div>
-            <div class="meta-row">
-              <div class="meta-item">
-                <span class="meta-icon">👤</span>
-                <span class="meta-value">${car.name || "—"}</span>
-              </div>
-              <div class="meta-item">
-                <span class="meta-icon">🕐</span>
-                <span class="meta-value">${car.time || "—"}</span>
-              </div>
-            </div>
-            <a class="record-btn" href="${formUrl}">
-              <span class="btn-icon">📋</span>운행일지 기록하기
-            </a>
-          `;
+          const card = makeEl("div", "car-card");
+
+          // 차량번호
+          const carNumber = makeEl("div", "car-number");
+          const carIcon = makeEl("span", "car-icon", "🚗");
+          carNumber.appendChild(carIcon);
+          carNumber.appendChild(
+            document.createTextNode(
+              car.carName ? car.carName + " · " + car.carNo : car.carNo,
+            ),
+          );
+          card.appendChild(carNumber);
+
+          // 주차위치
+          const slot = makeEl(
+            "div",
+            "parking-slot" + (hasParking ? "" : " unknown"),
+          );
+          slot.appendChild(makeEl("div", "slot-label", "주차 위치"));
+          slot.appendChild(
+            makeEl("div", "slot-value", hasParking ? car.parking : "미기록"),
+          );
+          card.appendChild(slot);
+
+          // 운전자/시간
+          const meta = makeEl("div", "meta-row");
+          const driverItem = makeEl("div", "meta-item");
+          driverItem.appendChild(makeEl("span", "meta-icon", "👤"));
+          driverItem.appendChild(
+            makeEl("span", "meta-value", car.name || "—"),
+          );
+          meta.appendChild(driverItem);
+
+          const timeItem = makeEl("div", "meta-item");
+          timeItem.appendChild(makeEl("span", "meta-icon", "🕐"));
+          timeItem.appendChild(makeEl("span", "meta-value", car.time || "—"));
+          meta.appendChild(timeItem);
+          card.appendChild(meta);
+
+          // 기록 버튼
+          const btn = makeEl("a", "record-btn");
+          btn.href = formUrl;
+          btn.appendChild(makeEl("span", "btn-icon", "📋"));
+          btn.appendChild(document.createTextNode("운행일지 기록하기"));
+          card.appendChild(btn);
+
           grid.appendChild(card);
         });
       }
