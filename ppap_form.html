@@ -1102,6 +1102,27 @@
         }
       }
 
+      // submit 직전 odo 최종 검증: 직전 이하이거나 1000km 이상 차이면 차단
+      function ensureOdoWithinBoundsOrAlert(odoVal, baseOdo) {
+        const odoEl = document.getElementById("currentOdo");
+        if (odoVal <= baseOdo) {
+          alert(
+            `주행 후 계기판 값(${odoVal.toLocaleString()}km)이 직전 계기판 값(${baseOdo.toLocaleString()}km) 이하입니다. 다시 확인해 주세요.`,
+          );
+          odoEl.focus();
+          return false;
+        }
+        const diff = odoVal - baseOdo;
+        if (diff >= 1000) {
+          alert(
+            `직전 계기판 값(${baseOdo.toLocaleString()}km)과 ${diff.toLocaleString()}km 차이가 납니다. 입력 값을 다시 확인해 주세요.`,
+          );
+          odoEl.focus();
+          return false;
+        }
+        return true;
+      }
+
       function selectType(type) {
         state.selectedType = type;
         document
@@ -1235,6 +1256,12 @@
           const odoVal = Number(document.getElementById("currentOdo").value);
           if (!odoVal) {
             alert("계기판 수치를 입력해주세요.");
+            return;
+          }
+          if (
+            state.savedRecord.prevOdo !== null &&
+            !ensureOdoWithinBoundsOrAlert(odoVal, state.savedRecord.prevOdo)
+          ) {
             return;
           }
 
@@ -1378,6 +1405,10 @@
         }
 
         // ── 일반 저장 전송 ──
+        if (!ensureOdoWithinBoundsOrAlert(odoVal, state.prevOdo)) {
+          return;
+        }
+
         const fixed = FIXED_USER[carNo];
         const name = fixed
           ? fixed.name

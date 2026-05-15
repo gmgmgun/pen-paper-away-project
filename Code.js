@@ -269,20 +269,6 @@ function getPrevOdoData(carNo, props) {
   return { prevOdo: Number(prevOdo), prevDate: String(prevDate), carName };
 }
 
-// ── READ: 이상 감지 ───────────────────────────────────────────────────
-function detectAnomalies({ 주행거리 }) {
-  const flags = [];
-  if (!Number.isFinite(주행거리)) {
-    flags.push("주행거리계산오류");
-    return flags;
-  }
-  if (주행거리 < 0) flags.push(`역주행감지(${주행거리}km)`);
-  else if (주행거리 === 0) flags.push("0km주행");
-  else if (주행거리 > CONFIG.MAX_DAILY_KM)
-    flags.push(`과다주행(${주행거리}km>${CONFIG.MAX_DAILY_KM})`);
-  return flags;
-}
-
 // ── WRITE: 운행 기록 저장 ─────────────────────────────────────────────
 function saveRecord(payload) {
   const lock = LockService.getScriptLock();
@@ -331,7 +317,7 @@ function saveRecord(payload) {
     const 주행거리 = isFirst ? "" : 주행후 - prevOdoNum;
     const 출퇴근 = isFirst ? "" : 사용구분 === "출퇴근용" ? 주행거리 : 0;
     const 일반업무 = isFirst ? "" : 사용구분 === "일반업무용" ? 주행거리 : 0;
-    const flags = isFirst ? ["초기값등록"] : detectAnomalies({ 주행거리 });
+    const flags = isFirst ? ["초기값등록"] : [];
 
     const id = Utilities.getUuid();
     const flagStr = flags.length > 0 ? flags.join(" | ") : "정상";
@@ -457,12 +443,10 @@ function _updateRecordInner(payload) {
   const 주행거리 = 주행후 - 주행전;
   const 출퇴근 = 사용구분 === "출퇴근용" ? 주행거리 : 0;
   const 일반업무 = 사용구분 === "일반업무용" ? 주행거리 : 0;
-  const flags = detectAnomalies({ 주행거리 });
+  const flags = [];
 
   const newId = Utilities.getUuid();
-  const flagStr =
-    (flags.length > 0 ? flags.join(" | ") + " | " : "") +
-    `수정됨(원본:${payload.originalId})`;
+  const flagStr = `수정됨(원본:${payload.originalId})`;
   const 타임스탬프 = Utilities.formatDate(
     now,
     "Asia/Seoul",
