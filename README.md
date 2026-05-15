@@ -145,22 +145,28 @@ feature 작업 → staging 푸시
 2. environment=prod, **skip_deploy=true** 선택 → 실행
 3. 나중에 deploy 만 원할 때 다시 Run workflow → skip_deploy=false
 
-### 보호 대상 파일
+### config.html 처리
 
-다음 파일은 CI 에 의해 덮어쓰여지지 않도록 `.claspignore` 에 포함되어 있습니다 — 운영/테스트 GAS 편집기에서 각각 직접 관리:
+`config.html` 은 직원/차량/거래처 데이터를 담고 있어 git 에는 커밋되지 않지만, `clasp push -f` 가 원격 파일을 로컬과 강제 동기화하면서 GAS 에서 삭제하는 문제가 있습니다.
 
-- `config.html` (직원/차량 설정, 민감 정보)
-- `config.json`
+**해결**: CI 가 push 직전에 `CONFIG_HTML` secret 에서 `config.html` 을 복원한 뒤 push.
 
-> ⚠️ 테스트 GAS 에도 `config.html` 을 별도로 두어야 `setupProperties()` 가 동작합니다. 운영의 `config.html` 을 그대로 복사해 두면 충분.
+1. 로컬 `config.html` 전체 내용을 GitHub Secret `CONFIG_HTML` 로 등록
+2. CI 가 매번 secret 에서 파일 생성 → clasp 가 정상 push → GAS 의 config.html 유지
+3. Secret 미설정 시 워크플로우는 **에러로 중단** (보호 장치)
+
+`config.html` 내용 변경이 필요하면: 로컬 파일 수정 → `CONFIG_HTML` secret 갱신 → staging/main 푸시. 운영/테스트 양쪽에 동일한 config 적용됨 (분리가 필요하면 환경별 secret 분리 검토).
+
+`config.json` 은 여전히 `.claspignore` 에 있고 사용되지 않으므로 손대지 않음.
 
 ### 트러블슈팅
 
 - **`CLASPRC_JSON secret is not set`** : secret 등록 누락.
 - **`GAS_SCRIPT_ID_TEST secret is not set`** : staging 푸시 전 테스트 환경 셋업 누락.
+- **`CONFIG_HTML secret 미설정`** : 로컬 `config.html` 내용을 그대로 secret 으로 등록 필요.
 - **`Could not read API credentials`** : clasp 토큰 만료. 로컬에서 `clasp login --no-localhost` 후 secret 재등록.
 - **테스트 GAS 가 운영 Sheets 를 건드림** : 위 2번 4단계(`SPREADSHEET_ID` 사전 세팅)를 생략한 경우. ScriptProperty 확인 후 `setupProperties()` 재실행.
-- **`clasp push -f` 가 일부 파일을 삭제** : 해당 파일을 `.claspignore` 에 추가.
+- **GAS 에서 파일이 갑자기 사라짐** : `clasp push -f` 가 .claspignore 파일도 삭제하는 케이스. secret 주입 방식(`CONFIG_HTML`)으로 처리하거나, .claspignore 가 안 통하면 secret 으로 복원.
 
 ---
 
