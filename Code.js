@@ -837,3 +837,170 @@ function serveParkingBoard() {
     .setTitle("주차 현황")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
+
+// ============================================================
+// BENCH — 성능 전후 비교 (영구 코드 아님, 측정 후 별도 커밋으로 제거)
+// ============================================================
+//
+// 사용: GAS 에디터에서 benchmarkAll() 1회 실행.
+//   - Logger 로그에 통계 출력
+//   - 스프레드시트 끝에 `_BENCH` 시트를 만들어 표로 기록
+//
+// 측정 대상:
+//   A. _getPrevOdoData_legacy : 변경 전 구현 (전체 A열 스캔 + 캐시 없음)
+//   B. getPrevOdoData (MISS)  : 변경 후, 매번 캐시 invalidate
+//   C. getPrevOdoData (HIT)   : 변경 후, 캐시 hit
+//   D. _getLastDataRow_legacy : 변경 전 전체 스캔
+//   E. getLastDataRow         : 변경 후 빠른 경로
+//
+// 가장 데이터 행이 많은 차량 탭을 자동 선택해 효과를 가시화.
+
+function _getLastDataRow_legacy(carSh) {
+  const lastRow = carSh.getLastRow();
+  if (lastRow < CONFIG.DATA_START_ROW) return -1;
+  const aCol = carSh
+    .getRange(CONFIG.DATA_START_ROW, 1, lastRow - CONFIG.DATA_START_ROW + 1, 1)
+    .getValues();
+  for (let i = aCol.length - 1; i >= 0; i--) {
+    if (String(aCol[i][0]).trim() !== "") {
+      return CONFIG.DATA_START_ROW + i;
+    }
+  }
+  return -1;
+}
+
+function _getPrevOdoData_legacy(carNo, props) {
+  const ss = getSpreadsheet();
+  const _props = props || getAllScriptProps();
+  const carMeta = JSON.parse(_props.CAR_META_JSON || "{}");
+  const carName = carMeta[carNo]?.차종 || "";
+  const carSh = ss.getSheetByName(carNo);
+  if (!carSh) return { prevOdo: null, prevDate: null, carName };
+  const lastDataRow = _getLastDataRow_legacy(carSh);
+  if (lastDataRow === -1) return { prevOdo: null, prevDate: null, carName };
+  const rowData = carSh
+    .getRange(lastDataRow, 1, 1, CAR_COL.주행후)
+    .getValues()[0];
+  const prevOdo = rowData[CAR_COL.주행후 - 1];
+  const prevDate = rowData[CAR_COL.날짜 - 1];
+  if (!prevOdo || Number(prevOdo) === 0)
+    return { prevOdo: null, prevDate: null, carName };
+  return { prevOdo: Number(prevOdo), prevDate: String(prevDate), carName };
+}
+
+function _bench_stats(arr) {
+  const sorted = [...arr].sort((a, b) => a - b);
+  const sum = arr.reduce((a, b) => a + b, 0);
+  return {
+    n: arr.length,
+    min: sorted[0],
+    p50: sorted[Math.floor(arr.length * 0.5)],
+    p95: sorted[Math.floor(arr.length * 0.95)],
+    max: sorted[arr.length - 1],
+    avg: Math.round(sum / arr.length),
+  };
+}
+
+function benchmarkAll() {
+  const ITER = 20;
+  const props = getAllScriptProps();
+  const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
+  const carNos = Object.keys(carMeta);
+
+  const ss = getSpreadsheet();
+  let target = null;
+  let targetRows = 0;
+  for (const c of carNos) {
+    const sh = ss.getSheetByName(c);
+    if (!sh) continue;
+    const rows = sh.getLastRow() - CONFIG.DATA_START_ROW + 1;
+    if (rows > targetRows) {
+      target = c;
+      targetRows = rows;
+    }
+  }
+  if (!target) {
+    Logger.log("벤치 대상 차량 없음");
+    return;
+  }
+  const targetSh = ss.getSheetByName(target);
+
+  // 워밍업
+  getSpreadsheet();
+  targetSh.getLastRow();
+  CacheService.getScriptCache().remove(_prevOdoCacheKey(target));
+
+  // A. legacy getPrevOdoData
+  const legacyPrev = [];
+  for (let i = 0; i < ITER; i++) {
+    const t = Date.now();
+    _getPrevOdoData_legacy(target, props);
+    legacyPrev.push(Date.now() - t);
+  }
+
+  // B. 현재 getPrevOdoData — MISS
+  const missPrev = [];
+  for (let i = 0; i < ITER; i++) {
+    CacheService.getScriptCache().remove(_prevOdoCacheKey(target));
+    const t = Date.now();
+    getPrevOdoData(target, props);
+    missPrev.push(Date.now() - t);
+  }
+
+  // C. 현재 getPrevOdoData — HIT
+  getPrevOdoData(target, props); // 캐시 채움
+  const hitPrev = [];
+  for (let i = 0; i < ITER; i++) {
+    const t = Date.now();
+    getPrevOdoData(target, props);
+    hitPrev.push(Date.now() - t);
+  }
+
+  // D. legacy getLastDataRow
+  const legacyLast = [];
+  for (let i = 0; i < ITER; i++) {
+    const t = Date.now();
+    _getLastDataRow_legacy(targetSh);
+    legacyLast.push(Date.now() - t);
+  }
+
+  // E. 현재 getLastDataRow
+  const currentLast = [];
+  for (let i = 0; i < ITER; i++) {
+    const t = Date.now();
+    getLastDataRow(targetSh);
+    currentLast.push(Date.now() - t);
+  }
+
+  const results = [
+    ["A. getPrevOdoData (legacy)", _bench_stats(legacyPrev)],
+    ["B. getPrevOdoData (현재, MISS)", _bench_stats(missPrev)],
+    ["C. getPrevOdoData (현재, HIT)", _bench_stats(hitPrev)],
+    ["D. getLastDataRow (legacy)", _bench_stats(legacyLast)],
+    ["E. getLastDataRow (현재)", _bench_stats(currentLast)],
+  ];
+
+  Logger.log(`벤치 대상: 차량=${target}, 데이터 행수≈${targetRows}, ITER=${ITER}`);
+  results.forEach(([label, s]) => {
+    Logger.log(`${label} → ${JSON.stringify(s)}`);
+  });
+
+  // 결과를 _BENCH 시트에 기록
+  let benchSh = ss.getSheetByName("_BENCH");
+  if (!benchSh) benchSh = ss.insertSheet("_BENCH");
+  const ts = Utilities.formatDate(
+    new Date(),
+    "Asia/Seoul",
+    "yyyy-MM-dd HH:mm:ss",
+  );
+  const header = ["시각", "차량", "행수", "ITER", "측정", "n", "min", "p50", "p95", "max", "avg"];
+  if (benchSh.getLastRow() === 0) {
+    benchSh.appendRow(header);
+  }
+  results.forEach(([label, s]) => {
+    benchSh.appendRow([ts, target, targetRows, ITER, label, s.n, s.min, s.p50, s.p95, s.max, s.avg]);
+  });
+
+  return { target, targetRows, results };
+}
+
