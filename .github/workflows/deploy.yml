@@ -93,6 +93,17 @@ jobs:
           echo "Switched .clasp.json to test scriptId"
           cat .clasp.json
 
+      - name: Restore config.html from secret
+        env:
+          CONFIG_HTML: ${{ secrets.CONFIG_HTML }}
+        run: |
+          if [ -z "$CONFIG_HTML" ]; then
+            echo "::error::CONFIG_HTML secret 미설정 — push 시 GAS 의 config.html 이 삭제됩니다. 보호를 위해 중단."
+            exit 1
+          fi
+          printf '%s' "$CONFIG_HTML" > config.html
+          echo "config.html restored ($(wc -c < config.html) bytes)"
+
       - name: Push to Apps Script
         run: clasp push -f
 
