@@ -1,5 +1,4 @@
 .clasprc.json
-.clasp.json
 *.gs
 config.html
 .claude/
