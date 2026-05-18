@@ -160,16 +160,15 @@
 
       // 사용자가 가질 수 있는 계정 인덱스 — 보통 0~4 정도면 충분.
       // 기본 URL(prefix 없음) 을 가장 먼저 시도해 anonymous + 단일 계정 사용자 커버.
-      // 다중 계정 prefix 는 '/u/N/' 가 호스트 바로 뒤(즉 '/macros/' 앞)에 들어가야 한다.
       function buildVariants(id) {
-        const host = "https://script.google.com";
+        const base = "https://script.google.com/macros/";
         return [
-          `${host}/macros/s/${id}/exec`,
-          `${host}/u/0/macros/s/${id}/exec`,
-          `${host}/u/1/macros/s/${id}/exec`,
-          `${host}/u/2/macros/s/${id}/exec`,
-          `${host}/u/3/macros/s/${id}/exec`,
-          `${host}/u/4/macros/s/${id}/exec`,
+          `${base}s/${id}/exec`,
+          `${base}u/0/s/${id}/exec`,
+          `${base}u/1/s/${id}/exec`,
+          `${base}u/2/s/${id}/exec`,
+          `${base}u/3/s/${id}/exec`,
+          `${base}u/4/s/${id}/exec`,
         ];
       }
 
