@@ -251,15 +251,6 @@
     <div class="grid" id="carGrid"></div>
 
     <script>
-      // iframe 안에서 동작 시(외부 redirect 래퍼) 부모창에 로드 완료 알림.
-      if (window.parent !== window) {
-        try {
-          window.parent.postMessage({ type: "ppap-ready" }, "*");
-        } catch (_) {
-          /* noop */
-        }
-      }
-
       const board = JSON.parse(
         document.getElementById("board-raw").textContent,
       );
