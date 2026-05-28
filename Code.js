@@ -540,15 +540,24 @@ function syncAllCarSheets() {
   }
 
   const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
-  const allData = rawSh
-    .getDataRange()
-    .getValues()
-    .slice(1)
+  const rawValues = rawSh.getDataRange().getValues().slice(1);
+
+  // 수정 이력에서 참조된 원본 id 는 무효화 — 수정본만 차량 탭에 그려지도록.
+  // _updateRecordInner 가 RAW 에 새 row 추가하면서 원본은 그대로 남기는 구조라
+  // 이걸 안 거르면 같은 운행이 차량 탭에 두 줄로 보임.
+  const invalidIds = new Set();
+  rawValues.forEach((r) => {
+    const m = String(r[COL.플래그] || "").match(/원본:([\w-]+)/);
+    if (m) invalidIds.add(m[1]);
+  });
+
+  const allData = rawValues
     .filter(
       (r) =>
         r[COL.차량번호] &&
         String(r[COL.차량번호]).trim() !== "" &&
-        r[COL.주행후] > 0,
+        r[COL.주행후] > 0 &&
+        !invalidIds.has(String(r[COL.ID])),
     )
     .sort((a, b) => new Date(a[COL.사용일자]) - new Date(b[COL.사용일자]));
 
