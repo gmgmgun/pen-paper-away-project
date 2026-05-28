@@ -97,52 +97,124 @@
         margin-top: 2px;
       }
 
-      .notice-banner-list {
-        margin: 16px 16px 0;
+      /* 공지사항 하단 시트 (bottom sheet) */
+      .notice-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 200;
+        background: rgba(0, 0, 0, 0);
+        pointer-events: none;
+        transition: background 0.28s ease-out;
+      }
+      .notice-overlay.show {
+        background: rgba(0, 0, 0, 0.45);
+        pointer-events: auto;
+      }
+      .notice-sheet {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 201;
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        background: #fff;
+        border-top-left-radius: 24px;
+        border-top-right-radius: 24px;
+        box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.18);
+        max-height: 80vh;
+        transform: translateY(100%);
+        transition: transform 0.28s ease-out;
+        padding-bottom: env(safe-area-inset-bottom);
+        visibility: hidden;
       }
-      .notice-banner-list:empty {
-        display: none;
+      .notice-sheet.show {
+        transform: translateY(0);
+        visibility: visible;
       }
-      .notice-banner {
-        position: relative;
-        padding: 14px 44px 14px 16px;
+      .notice-sheet-handle {
+        width: 44px;
+        height: 5px;
+        background: #cbd5e1;
+        border-radius: 999px;
+        margin: 10px auto 4px;
+        flex-shrink: 0;
+      }
+      .notice-sheet-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 20px 12px;
+        flex-shrink: 0;
+      }
+      .notice-sheet-title {
+        font-size: 1.0625rem;
+        font-weight: 800;
+        color: var(--text-main);
+      }
+      .notice-sheet-close {
+        width: 40px;
+        height: 40px;
+        border: none;
+        background: transparent;
+        font-size: 1.5rem;
+        line-height: 1;
+        color: var(--text-sub);
+        cursor: pointer;
+        border-radius: 12px;
+        font-family: inherit;
+      }
+      .notice-sheet-close:active {
+        background: var(--bg);
+      }
+      .notice-sheet-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 4px 20px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .notice-item {
+        padding: 16px 16px 18px;
         background: var(--accent-light);
-        border: 1.5px solid var(--accent-mid);
         border-radius: var(--radius-sm);
-        font-size: 0.875rem;
-        color: #1e3a8a;
-        line-height: 1.6;
+        border-left: 4px solid var(--accent);
       }
-      .notice-banner-title {
-        display: block;
-        font-weight: 700;
+      .notice-item-title {
+        font-size: 1rem;
+        font-weight: 800;
+        color: var(--text-main);
+        margin-bottom: 6px;
+        letter-spacing: -0.2px;
+      }
+      .notice-item-body {
         font-size: 0.9375rem;
-        margin-bottom: 4px;
-      }
-      .notice-banner-body {
+        color: var(--text-main);
+        line-height: 1.6;
         white-space: pre-wrap;
         word-break: break-word;
       }
-      .notice-banner-close {
-        position: absolute;
-        top: 6px;
-        right: 6px;
-        width: 32px;
-        height: 32px;
-        border: none;
-        background: transparent;
-        color: #1e3a8a;
-        font-size: 1.25rem;
-        line-height: 1;
-        cursor: pointer;
-        border-radius: 8px;
-        font-family: inherit;
+      .notice-sheet-footer {
+        padding: 12px 20px 20px;
+        flex-shrink: 0;
+        border-top: 1px solid var(--border);
       }
-      .notice-banner-close:active {
-        background: rgba(29, 78, 216, 0.12);
+      .notice-sheet-confirm {
+        width: 100%;
+        padding: 20px;
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: var(--radius-sm);
+        font-size: 1.0625rem;
+        font-weight: 800;
+        font-family: inherit;
+        cursor: pointer;
+        letter-spacing: -0.2px;
+      }
+      .notice-sheet-confirm:active {
+        transform: scale(0.98);
       }
 
       .edit-mode-banner {
@@ -700,8 +772,6 @@
         </div>
       </div>
 
-      <div class="notice-banner-list" id="noticeBannerList"></div>
-
       <div class="edit-mode-banner" id="editModeBanner">
         <b>✏️ 수정 모드</b>
         방금 저장한 기록을 수정합니다.<br />변경할 항목만 수정 후 저장해 주세요.
@@ -921,6 +991,38 @@
       </div>
     </div>
 
+    <div class="notice-overlay" id="noticeOverlay"></div>
+    <div
+      class="notice-sheet"
+      id="noticeSheet"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="noticeSheetTitle"
+    >
+      <div class="notice-sheet-handle"></div>
+      <div class="notice-sheet-header">
+        <span class="notice-sheet-title" id="noticeSheetTitle">📢 공지사항</span>
+        <button
+          type="button"
+          class="notice-sheet-close"
+          id="noticeSheetClose"
+          aria-label="공지 닫기"
+        >
+          ×
+        </button>
+      </div>
+      <div class="notice-sheet-list" id="noticeSheetList"></div>
+      <div class="notice-sheet-footer">
+        <button
+          type="button"
+          class="notice-sheet-confirm"
+          id="noticeSheetConfirm"
+        >
+          확인
+        </button>
+      </div>
+    </div>
+
     <script>
       const _CONFIG = JSON.parse(
         document.getElementById("config-raw").textContent,
@@ -1023,55 +1125,65 @@
       }
 
       function renderNotices() {
-        const list = document.getElementById("noticeBannerList");
-        if (!list) return;
+        const sheet = document.getElementById("noticeSheet");
+        const overlay = document.getElementById("noticeOverlay");
+        const list = document.getElementById("noticeSheetList");
+        if (!sheet || !overlay || !list) return;
+
         let notices = [];
         try {
           notices = JSON.parse(
             document.getElementById("notices-raw").textContent,
           );
-        } catch (_) {
-          notices = [];
-        }
+        } catch (_) {}
         if (!Array.isArray(notices) || notices.length === 0) return;
 
-        notices.forEach((n) => {
-          if (!n || !n.id) return;
-          const dismissKey = "ppap_notice_dismissed_" + n.id;
+        const pending = notices.filter((n) => {
+          if (!n || !n.id) return false;
           try {
-            if (localStorage.getItem(dismissKey)) return;
-          } catch (_) {}
+            return !localStorage.getItem("ppap_notice_dismissed_" + n.id);
+          } catch (_) {
+            return true;
+          }
+        });
+        if (pending.length === 0) return;
 
-          const banner = document.createElement("div");
-          banner.className = "notice-banner";
-
+        list.innerHTML = "";
+        pending.forEach((n) => {
+          const item = document.createElement("div");
+          item.className = "notice-item";
           if (n.title) {
-            const t = document.createElement("span");
-            t.className = "notice-banner-title";
-            t.textContent = "📢 " + n.title;
-            banner.appendChild(t);
+            const t = document.createElement("div");
+            t.className = "notice-item-title";
+            t.textContent = n.title;
+            item.appendChild(t);
           }
           if (n.body) {
-            const b = document.createElement("span");
-            b.className = "notice-banner-body";
+            const b = document.createElement("div");
+            b.className = "notice-item-body";
             b.textContent = n.body;
-            banner.appendChild(b);
+            item.appendChild(b);
           }
+          list.appendChild(item);
+        });
 
-          const close = document.createElement("button");
-          close.type = "button";
-          close.className = "notice-banner-close";
-          close.setAttribute("aria-label", "공지 닫기");
-          close.textContent = "×";
-          close.onclick = function () {
+        function dismiss() {
+          pending.forEach((n) => {
             try {
-              localStorage.setItem(dismissKey, "1");
+              localStorage.setItem("ppap_notice_dismissed_" + n.id, "1");
             } catch (_) {}
-            banner.remove();
-          };
-          banner.appendChild(close);
+          });
+          sheet.classList.remove("show");
+          overlay.classList.remove("show");
+        }
 
-          list.appendChild(banner);
+        document.getElementById("noticeSheetClose").onclick = dismiss;
+        document.getElementById("noticeSheetConfirm").onclick = dismiss;
+        overlay.onclick = dismiss;
+
+        requestAnimationFrame(() => {
+          sheet.classList.add("show");
+          overlay.classList.add("show");
         });
       }
 
