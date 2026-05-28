@@ -97,6 +97,54 @@
         margin-top: 2px;
       }
 
+      .notice-banner-list {
+        margin: 16px 16px 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .notice-banner-list:empty {
+        display: none;
+      }
+      .notice-banner {
+        position: relative;
+        padding: 14px 44px 14px 16px;
+        background: var(--accent-light);
+        border: 1.5px solid var(--accent-mid);
+        border-radius: var(--radius-sm);
+        font-size: 0.875rem;
+        color: #1e3a8a;
+        line-height: 1.6;
+      }
+      .notice-banner-title {
+        display: block;
+        font-weight: 700;
+        font-size: 0.9375rem;
+        margin-bottom: 4px;
+      }
+      .notice-banner-body {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .notice-banner-close {
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        width: 32px;
+        height: 32px;
+        border: none;
+        background: transparent;
+        color: #1e3a8a;
+        font-size: 1.25rem;
+        line-height: 1;
+        cursor: pointer;
+        border-radius: 8px;
+        font-family: inherit;
+      }
+      .notice-banner-close:active {
+        background: rgba(29, 78, 216, 0.12);
+      }
+
       .edit-mode-banner {
         margin: 16px 16px 0;
         padding: 16px 18px;
@@ -631,6 +679,9 @@
     <script id="prevodo-raw" type="application/json">
       <?!= prevOdoJson ?>
     </script>
+    <script id="notices-raw" type="application/json">
+      <?!= noticesJson ?>
+    </script>
 
     <div class="loading-overlay" id="overlay">
       <div class="spinner"></div>
@@ -648,6 +699,8 @@
           주행 정보를 입력해 주세요
         </div>
       </div>
+
+      <div class="notice-banner-list" id="noticeBannerList"></div>
 
       <div class="edit-mode-banner" id="editModeBanner">
         <b>✏️ 수정 모드</b>
@@ -969,7 +1022,62 @@
         setBtnState(odoValid && parkingValid && nameValid && noteValid);
       }
 
+      function renderNotices() {
+        const list = document.getElementById("noticeBannerList");
+        if (!list) return;
+        let notices = [];
+        try {
+          notices = JSON.parse(
+            document.getElementById("notices-raw").textContent,
+          );
+        } catch (_) {
+          notices = [];
+        }
+        if (!Array.isArray(notices) || notices.length === 0) return;
+
+        notices.forEach((n) => {
+          if (!n || !n.id) return;
+          const dismissKey = "ppap_notice_dismissed_" + n.id;
+          try {
+            if (localStorage.getItem(dismissKey)) return;
+          } catch (_) {}
+
+          const banner = document.createElement("div");
+          banner.className = "notice-banner";
+
+          if (n.title) {
+            const t = document.createElement("span");
+            t.className = "notice-banner-title";
+            t.textContent = "📢 " + n.title;
+            banner.appendChild(t);
+          }
+          if (n.body) {
+            const b = document.createElement("span");
+            b.className = "notice-banner-body";
+            b.textContent = n.body;
+            banner.appendChild(b);
+          }
+
+          const close = document.createElement("button");
+          close.type = "button";
+          close.className = "notice-banner-close";
+          close.setAttribute("aria-label", "공지 닫기");
+          close.textContent = "×";
+          close.onclick = function () {
+            try {
+              localStorage.setItem(dismissKey, "1");
+            } catch (_) {}
+            banner.remove();
+          };
+          banner.appendChild(close);
+
+          list.appendChild(banner);
+        });
+      }
+
       window.onload = function () {
+        renderNotices();
+
         const now = new Date();
         const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
         document.getElementById("headerDate").textContent =

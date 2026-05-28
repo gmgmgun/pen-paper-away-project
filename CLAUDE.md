@@ -61,6 +61,7 @@ GAS 에디터에서 직접 실행해야 하는 setup 함수들. 코드 배포만
 - `setupExportTrigger` — 매월 1일 자정 Excel 백업 트리거
 - `setupWarmupTrigger` — 5분 워밍업 트리거
 - `setupDailyResyncTrigger` — 매일 04:00 KST 차량 탭 재정렬 (과거 날짜 입력 보정)
+- `setupNoticeSheet` — `공지사항` 시트 생성/헤더·체크박스·검증 세팅 (배너 기능 최초 1회)
 
 새 setup 함수를 추가하거나 트리거 변경 시 사용자에게 GAS 에디터에서 어떤 함수를 어느 환경(test/prod)에서 실행해야 하는지 명확히 안내.
 

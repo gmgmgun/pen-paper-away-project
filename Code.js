@@ -115,6 +115,7 @@ function serveForm(e) {
   tpl.carNo = carNo;
   tpl.carName = prevOdoData.carName || "";
   tpl.prevOdoJson = JSON.stringify(prevOdoData);
+  tpl.noticesJson = JSON.stringify(getNotices("form"));
 
   return tpl
     .evaluate()
@@ -828,6 +829,7 @@ function serveParkingBoard() {
   tpl.boardJson = JSON.stringify(boardData);
   tpl.updatedAt = now;
   tpl.baseUrl = baseUrl;
+  tpl.noticesJson = JSON.stringify(getNotices("board"));
 
   return tpl
     .evaluate()
@@ -835,3 +837,116 @@ function serveParkingBoard() {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+// ── 공지사항 ──────────────────────────────────────────────────────────
+// 시트 `공지사항` (헤더: id | 제목 | 내용 | 시작일 | 종료일 | 활성 | 페이지)
+// 페이지: form / board / both. 즉시 반영을 위해 onEdit 가 캐시 invalidate.
+const NOTICE_SHEET = "공지사항";
+const NOTICE_HEADER = [
+  "id",
+  "제목",
+  "내용",
+  "시작일",
+  "종료일",
+  "활성",
+  "페이지",
+];
+const NOTICE_CACHE_KEYS = ["notices:form", "notices:board"];
+
+function _buildNotices(page) {
+  const ss = getSpreadsheet();
+  const sh = ss.getSheetByName(NOTICE_SHEET);
+  if (!sh) return [];
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+
+  const rows = sh
+    .getRange(2, 1, lastRow - 1, NOTICE_HEADER.length)
+    .getValues();
+  const today = Utilities.formatDate(new Date(), "Asia/Seoul", "yyyy-MM-dd");
+
+  const result = [];
+  rows.forEach((r) => {
+    const id = String(r[0] || "").trim();
+    if (!id) return;
+    const title = String(r[1] || "").trim();
+    const body = String(r[2] || "").trim();
+    if (!title && !body) return;
+
+    const active = r[5] === true || String(r[5]).toUpperCase() === "TRUE";
+    if (!active) return;
+
+    const start = r[3]
+      ? Utilities.formatDate(new Date(r[3]), "Asia/Seoul", "yyyy-MM-dd")
+      : "";
+    const end = r[4]
+      ? Utilities.formatDate(new Date(r[4]), "Asia/Seoul", "yyyy-MM-dd")
+      : "";
+    if (start && today < start) return;
+    if (end && today > end) return;
+
+    const target = String(r[6] || "both").trim().toLowerCase();
+    if (target !== "both" && target !== page) return;
+
+    result.push({ id, title, body });
+  });
+  return result;
+}
+
+function getNotices(page) {
+  const cache = CacheService.getScriptCache();
+  const key = `notices:${page}`;
+  const cached = cache.get(key);
+  if (cached) return JSON.parse(cached);
+
+  const result = _buildNotices(page);
+  // TTL 10분. 사용자 편집은 onEdit 가 즉시 invalidate.
+  cache.put(key, JSON.stringify(result), 600);
+  return result;
+}
+
+function invalidateNoticesCache() {
+  CacheService.getScriptCache().removeAll(NOTICE_CACHE_KEYS);
+}
+
+// 공지사항 시트 편집 시 캐시 즉시 비움. simple onEdit 트리거(자동 동작).
+// throw 하면 사용자 편집 UI에 에러 토스트가 뜨므로 조용히 무시.
+function onEdit(e) {
+  try {
+    if (!e || !e.range) return;
+    if (e.range.getSheet().getName() !== NOTICE_SHEET) return;
+    CacheService.getScriptCache().removeAll(NOTICE_CACHE_KEYS);
+  } catch (_) {}
+}
+
+// 공지사항 시트 초기화 (1회 수동 실행). 시트 없으면 생성 + 헤더/검증/체크박스 세팅.
+function setupNoticeSheet() {
+  const ss = getSpreadsheet();
+  let sh = ss.getSheetByName(NOTICE_SHEET);
+  if (!sh) sh = ss.insertSheet(NOTICE_SHEET);
+
+  sh.getRange(1, 1, 1, NOTICE_HEADER.length)
+    .setValues([NOTICE_HEADER])
+    .setFontWeight("bold")
+    .setBackground("#eff6ff");
+  sh.setFrozenRows(1);
+
+  // 활성 컬럼(F) 체크박스
+  sh.getRange("F2:F").insertCheckboxes();
+
+  // 페이지 컬럼(G) 검증
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(["form", "board", "both"], true)
+    .build();
+  sh.getRange("G2:G").setDataValidation(rule);
+
+  sh.setColumnWidth(1, 60);
+  sh.setColumnWidth(2, 220);
+  sh.setColumnWidth(3, 420);
+  sh.setColumnWidth(4, 110);
+  sh.setColumnWidth(5, 110);
+  sh.setColumnWidth(6, 70);
+  sh.setColumnWidth(7, 90);
+
+  invalidateNoticesCache();
+  Logger.log("공지사항 시트 초기화 완료");
+}
