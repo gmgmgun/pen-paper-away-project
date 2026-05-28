@@ -1138,14 +1138,7 @@
         } catch (_) {}
         if (!Array.isArray(notices) || notices.length === 0) return;
 
-        const pending = notices.filter((n) => {
-          if (!n || !n.id) return false;
-          try {
-            return !localStorage.getItem("ppap_notice_dismissed_" + n.id);
-          } catch (_) {
-            return true;
-          }
-        });
+        const pending = notices.filter((n) => n && n.id);
         if (pending.length === 0) return;
 
         list.innerHTML = "";
@@ -1168,11 +1161,7 @@
         });
 
         function dismiss() {
-          pending.forEach((n) => {
-            try {
-              localStorage.setItem("ppap_notice_dismissed_" + n.id, "1");
-            } catch (_) {}
-          });
+          // 현재 페이지뷰에서만 숨김 — 새로고침 시 다시 표시.
           sheet.classList.remove("show");
           overlay.classList.remove("show");
         }
