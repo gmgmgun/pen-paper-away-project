@@ -540,15 +540,24 @@ function syncAllCarSheets() {
   }
 
   const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
-  const allData = rawSh
-    .getDataRange()
-    .getValues()
-    .slice(1)
+  const rawValues = rawSh.getDataRange().getValues().slice(1);
+
+  // 수정 이력에서 참조된 원본 id 는 무효화 — 수정본만 차량 탭에 그려지도록.
+  // _updateRecordInner 가 RAW 에 새 row 추가하면서 원본은 그대로 남기는 구조라
+  // 이걸 안 거르면 같은 운행이 차량 탭에 두 줄로 보임.
+  const invalidIds = new Set();
+  rawValues.forEach((r) => {
+    const m = String(r[COL.플래그] || "").match(/원본:([\w-]+)/);
+    if (m) invalidIds.add(m[1]);
+  });
+
+  const allData = rawValues
     .filter(
       (r) =>
         r[COL.차량번호] &&
         String(r[COL.차량번호]).trim() !== "" &&
-        r[COL.주행후] > 0,
+        r[COL.주행후] > 0 &&
+        !invalidIds.has(String(r[COL.ID])),
     )
     .sort((a, b) => new Date(a[COL.사용일자]) - new Date(b[COL.사용일자]));
 
@@ -557,6 +566,22 @@ function syncAllCarSheets() {
     const car = String(r[COL.차량번호]).trim();
     if (!carMap[car]) carMap[car] = [];
     carMap[car].push(r);
+  });
+
+  // (차량+사용일자+주행후) 키로 RAW 중복 row 제거. 마지막(=최신 타임스탬프) 우선.
+  // 같은 차량의 같은 날 동일 주행후 = 물리적으로 중복일 수밖에 없음.
+  Object.keys(carMap).forEach((carNo) => {
+    const seen = new Map();
+    carMap[carNo].forEach((r) => {
+      const dateKey = Utilities.formatDate(
+        new Date(r[COL.사용일자]),
+        "Asia/Seoul",
+        "yyyy-MM-dd",
+      );
+      const key = `${dateKey}|${r[COL.주행후]}`;
+      seen.set(key, r); // 같은 키면 뒤 row 가 덮어씀 (정렬상 더 늦은 행 우선)
+    });
+    carMap[carNo] = Array.from(seen.values());
   });
 
   Object.entries(carMap).forEach(([carNo, rows]) => {
@@ -588,9 +613,25 @@ function syncAllCarSheets() {
       return row;
     });
 
-    carSh
-      .getRange(CONFIG.DATA_START_ROW, 1, writeData.length, CAR_TOTAL_COLS)
-      .setValues(writeData);
+    // 데이터 시작행 이하 전체 clearContent — 이전 sync 가 더 많은 row 를 그렸을
+    // 경우의 잔재 0 row 제거. 원인 미상 중복 row 도 함께 정리됨.
+    const lastRow = carSh.getLastRow();
+    if (lastRow >= CONFIG.DATA_START_ROW) {
+      carSh
+        .getRange(
+          CONFIG.DATA_START_ROW,
+          1,
+          lastRow - CONFIG.DATA_START_ROW + 1,
+          CAR_TOTAL_COLS,
+        )
+        .clearContent();
+    }
+
+    if (writeData.length > 0) {
+      carSh
+        .getRange(CONFIG.DATA_START_ROW, 1, writeData.length, CAR_TOTAL_COLS)
+        .setValues(writeData);
+    }
     Logger.log(`${carNo}: ${rows.length}건 동기화 완료`);
   });
 }
@@ -852,6 +893,27 @@ const NOTICE_HEADER = [
 ];
 const NOTICE_CACHE_KEYS = ["notices:form", "notices:board"];
 
+// 셀 값(Date 객체 또는 문자열)을 ms 로 변환. 시작 시각용 — 시간 미입력 시 KST 자정 = 그 날 시작.
+function _noticeStartMs(v) {
+  if (v == null || v === "") return null;
+  const d = v instanceof Date ? v : new Date(v);
+  const t = d.getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+// 종료 시각용. 시간 부분이 모두 0(KST 자정) 이면 "그 날 종일" 의미로 보정 — 다음 날 자정 직전까지 노출.
+// 운영자가 "yyyy-MM-dd HH:mm" 처럼 시간까지 적으면 분 단위 만료, "yyyy-MM-dd" 만 적으면 종일.
+function _noticeEndMs(v) {
+  if (v == null || v === "") return null;
+  const d = v instanceof Date ? v : new Date(v);
+  const t = d.getTime();
+  if (!Number.isFinite(t)) return null;
+  if (d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0) {
+    return t + 86400000 - 1;
+  }
+  return t;
+}
+
 function _buildNotices(page) {
   const ss = getSpreadsheet();
   const sh = ss.getSheetByName(NOTICE_SHEET);
@@ -862,7 +924,7 @@ function _buildNotices(page) {
   const rows = sh
     .getRange(2, 1, lastRow - 1, NOTICE_HEADER.length)
     .getValues();
-  const today = Utilities.formatDate(new Date(), "Asia/Seoul", "yyyy-MM-dd");
+  const nowMs = Date.now();
 
   const result = [];
   rows.forEach((r) => {
@@ -875,14 +937,10 @@ function _buildNotices(page) {
     const active = r[5] === true || String(r[5]).toUpperCase() === "TRUE";
     if (!active) return;
 
-    const start = r[3]
-      ? Utilities.formatDate(new Date(r[3]), "Asia/Seoul", "yyyy-MM-dd")
-      : "";
-    const end = r[4]
-      ? Utilities.formatDate(new Date(r[4]), "Asia/Seoul", "yyyy-MM-dd")
-      : "";
-    if (start && today < start) return;
-    if (end && today > end) return;
+    const startMs = _noticeStartMs(r[3]);
+    const endMs = _noticeEndMs(r[4]);
+    if (startMs !== null && nowMs < startMs) return;
+    if (endMs !== null && nowMs > endMs) return;
 
     const target = String(r[6] || "both").trim().toLowerCase();
     if (target !== "both" && target !== page) return;
