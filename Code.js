@@ -559,6 +559,22 @@ function syncAllCarSheets() {
     carMap[car].push(r);
   });
 
+  // (차량+사용일자+주행후) 키로 RAW 중복 row 제거. 마지막(=최신 타임스탬프) 우선.
+  // 같은 차량의 같은 날 동일 주행후 = 물리적으로 중복일 수밖에 없음.
+  Object.keys(carMap).forEach((carNo) => {
+    const seen = new Map();
+    carMap[carNo].forEach((r) => {
+      const dateKey = Utilities.formatDate(
+        new Date(r[COL.사용일자]),
+        "Asia/Seoul",
+        "yyyy-MM-dd",
+      );
+      const key = `${dateKey}|${r[COL.주행후]}`;
+      seen.set(key, r); // 같은 키면 뒤 row 가 덮어씀 (정렬상 더 늦은 행 우선)
+    });
+    carMap[carNo] = Array.from(seen.values());
+  });
+
   Object.entries(carMap).forEach(([carNo, rows]) => {
     const carSh = ss.getSheetByName(carNo);
     if (!carSh) {
@@ -588,9 +604,25 @@ function syncAllCarSheets() {
       return row;
     });
 
-    carSh
-      .getRange(CONFIG.DATA_START_ROW, 1, writeData.length, CAR_TOTAL_COLS)
-      .setValues(writeData);
+    // 데이터 시작행 이하 전체 clearContent — 이전 sync 가 더 많은 row 를 그렸을
+    // 경우의 잔재 0 row 제거. 원인 미상 중복 row 도 함께 정리됨.
+    const lastRow = carSh.getLastRow();
+    if (lastRow >= CONFIG.DATA_START_ROW) {
+      carSh
+        .getRange(
+          CONFIG.DATA_START_ROW,
+          1,
+          lastRow - CONFIG.DATA_START_ROW + 1,
+          CAR_TOTAL_COLS,
+        )
+        .clearContent();
+    }
+
+    if (writeData.length > 0) {
+      carSh
+        .getRange(CONFIG.DATA_START_ROW, 1, writeData.length, CAR_TOTAL_COLS)
+        .setValues(writeData);
+    }
     Logger.log(`${carNo}: ${rows.length}건 동기화 완료`);
   });
 }

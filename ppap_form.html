@@ -1045,6 +1045,9 @@
         isFirst: false,
         isEditMode: false,
         savedRecord: null,
+        // 더블 제출 가드 — saveRecord/updateRecord 가 두 번 호출되어 RAW 에
+        // 같은 자료가 두 줄 들어가는 사고 방지.
+        isSubmitting: false,
       };
 
       function setCardDone(cardId, iconId) {
@@ -1438,6 +1441,8 @@
       }
 
       function submitForm() {
+        if (state.isSubmitting) return;
+
         // 공통 주차위치 검증
         if (!state.selectedParking) {
           alert("주차 위치를 선택해주세요.");
@@ -1473,9 +1478,11 @@
 
           document.getElementById("overlayText").textContent = "수정 중...";
           document.getElementById("overlay").classList.add("show");
+          state.isSubmitting = true;
 
           google.script.run
             .withSuccessHandler((data) => {
+              state.isSubmitting = false;
               document.getElementById("overlay").classList.remove("show");
               if (data.success) {
                 state.savedRecord = {
@@ -1518,6 +1525,7 @@
               }
             })
             .withFailureHandler((err) => {
+              state.isSubmitting = false;
               document.getElementById("overlay").classList.remove("show");
               alert("오류 발생: " + err.message);
             })
@@ -1546,8 +1554,10 @@
         if (state.isFirst) {
           document.getElementById("overlayText").textContent = "저장 중...";
           document.getElementById("overlay").classList.add("show");
+          state.isSubmitting = true;
           google.script.run
             .withSuccessHandler((data) => {
+              state.isSubmitting = false;
               document.getElementById("overlay").classList.remove("show");
               if (data.success) {
                 state.savedRecord = {
@@ -1576,6 +1586,11 @@
               } else {
                 alert("저장 실패: " + data.message);
               }
+            })
+            .withFailureHandler((err) => {
+              state.isSubmitting = false;
+              document.getElementById("overlay").classList.remove("show");
+              alert("오류 발생: " + err.message);
             })
             .saveRecord({
               carNo,
@@ -1613,9 +1628,11 @@
 
         document.getElementById("overlayText").textContent = "저장 중...";
         document.getElementById("overlay").classList.add("show");
+        state.isSubmitting = true;
 
         google.script.run
           .withSuccessHandler((data) => {
+            state.isSubmitting = false;
             document.getElementById("overlay").classList.remove("show");
             if (data.success) {
               state.savedRecord = {
@@ -1648,6 +1665,7 @@
             }
           })
           .withFailureHandler((err) => {
+            state.isSubmitting = false;
             document.getElementById("overlay").classList.remove("show");
             alert("오류 발생: " + err.message);
           })
