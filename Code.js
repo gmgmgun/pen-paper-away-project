@@ -852,6 +852,27 @@ const NOTICE_HEADER = [
 ];
 const NOTICE_CACHE_KEYS = ["notices:form", "notices:board"];
 
+// 셀 값(Date 객체 또는 문자열)을 ms 로 변환. 시작 시각용 — 시간 미입력 시 KST 자정 = 그 날 시작.
+function _noticeStartMs(v) {
+  if (v == null || v === "") return null;
+  const d = v instanceof Date ? v : new Date(v);
+  const t = d.getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+// 종료 시각용. 시간 부분이 모두 0(KST 자정) 이면 "그 날 종일" 의미로 보정 — 다음 날 자정 직전까지 노출.
+// 운영자가 "yyyy-MM-dd HH:mm" 처럼 시간까지 적으면 분 단위 만료, "yyyy-MM-dd" 만 적으면 종일.
+function _noticeEndMs(v) {
+  if (v == null || v === "") return null;
+  const d = v instanceof Date ? v : new Date(v);
+  const t = d.getTime();
+  if (!Number.isFinite(t)) return null;
+  if (d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0) {
+    return t + 86400000 - 1;
+  }
+  return t;
+}
+
 function _buildNotices(page) {
   const ss = getSpreadsheet();
   const sh = ss.getSheetByName(NOTICE_SHEET);
@@ -862,7 +883,7 @@ function _buildNotices(page) {
   const rows = sh
     .getRange(2, 1, lastRow - 1, NOTICE_HEADER.length)
     .getValues();
-  const today = Utilities.formatDate(new Date(), "Asia/Seoul", "yyyy-MM-dd");
+  const nowMs = Date.now();
 
   const result = [];
   rows.forEach((r) => {
@@ -875,14 +896,10 @@ function _buildNotices(page) {
     const active = r[5] === true || String(r[5]).toUpperCase() === "TRUE";
     if (!active) return;
 
-    const start = r[3]
-      ? Utilities.formatDate(new Date(r[3]), "Asia/Seoul", "yyyy-MM-dd")
-      : "";
-    const end = r[4]
-      ? Utilities.formatDate(new Date(r[4]), "Asia/Seoul", "yyyy-MM-dd")
-      : "";
-    if (start && today < start) return;
-    if (end && today > end) return;
+    const startMs = _noticeStartMs(r[3]);
+    const endMs = _noticeEndMs(r[4]);
+    if (startMs !== null && nowMs < startMs) return;
+    if (endMs !== null && nowMs > endMs) return;
 
     const target = String(r[6] || "both").trim().toLowerCase();
     if (target !== "both" && target !== page) return;
