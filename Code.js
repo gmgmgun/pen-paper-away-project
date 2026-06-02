@@ -818,10 +818,16 @@ function setupProperties() {
   );
   const props = PropertiesService.getScriptProperties();
 
-  // 환경 분리: 테스트 GAS 에서는 사전에 SPREADSHEET_ID 를 세팅해두면
-  // 그 값을 그대로 사용. 비어 있으면 운영 ID 로 폴백.
-  const DEFAULT_PROD_ID = "1sgzKrRD47t8429NpSOiaRJHeRCIBPf98TsqIjlGYU9A";
-  const ssId = props.getProperty("SPREADSHEET_ID") || DEFAULT_PROD_ID;
+  // [샘플 브랜치] 운영 ID 폴백 제거 — 본인 스프레드시트 ID 를 반드시 먼저 세팅.
+  // 빈 값으로 실행하면 즉시 중단해 엉뚱한 시트에 쓰는 사고를 방지한다.
+  const ssId = props.getProperty("SPREADSHEET_ID");
+  if (!ssId) {
+    throw new Error(
+      "SPREADSHEET_ID 스크립트 속성이 비어 있습니다. " +
+        "ONBOARDING.md 의 '4. 스크립트 속성 세팅' 단계를 먼저 완료하세요 " +
+        "(본인이 만든 샘플 스프레드시트의 ID 를 SPREADSHEET_ID 로 등록).",
+    );
+  }
   props.setProperty("SPREADSHEET_ID", ssId);
 
   props.setProperty("STAFF_JSON", JSON.stringify(config.staff));
