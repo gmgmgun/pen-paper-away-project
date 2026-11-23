@@ -16,6 +16,7 @@
 const CONFIG = {
   SHEET_RAW: "RAW_운행일지",
   SHEET_MASTER: "차량_마스터",
+  SHEET_CAR_TEMPLATE: "차량_양식", // 새 차량 탭 원본 (syncCarRegistry)
   MAX_DAILY_KM: 500,
   GAP_ALERT_DAYS: 3,
   DATA_START_ROW: 15,
@@ -707,7 +708,11 @@ function syncAllCarSheets() {
 // [사용법]
 // setupExportTrigger() 를 1회 수동 실행 → 이후 매월 1일 자정(KST) 자동 실행
 //
-const EXPORT_EXCLUDE_SHEETS = ["RAW_운행일지", "차량_마스터"];
+const EXPORT_EXCLUDE_SHEETS = [
+  "RAW_운행일지",
+  "차량_마스터",
+  CONFIG.SHEET_CAR_TEMPLATE,
+];
 
 function exportToExcel() {
   const ss = getSpreadsheet();
@@ -894,18 +899,7 @@ function setupProperties() {
   const ss = SpreadsheetApp.openById(ssId);
   const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
   const masterData = masterSh.getDataRange().getValues().slice(1);
-  // 열: A 차량번호 | B 차종 | C (메모, 미사용) | D 법인명 | E 사업자번호 | F 반납일
-  const carMeta = {};
-  masterData.forEach((r) => {
-    if (r[0]) {
-      carMeta[String(r[0])] = {
-        차종: r[1] || "",
-        법인명: r[3] || "",
-        사업자번호: r[4] || "",
-        반납일: normalizeReturnDate(r[5]),
-      };
-    }
-  });
+  const carMeta = _buildCarMeta(masterData);
   props.setProperty("CAR_META_JSON", JSON.stringify(carMeta));
   // 반납일 변경이 30분 TTL 캐시에 가려지지 않도록 보드 캐시를 비운다.
   CacheService.getScriptCache().remove("parking_board");
@@ -919,6 +913,110 @@ function setupProperties() {
       Object.keys(carMeta).length +
       "대 캐싱",
   );
+}
+
+// ── 차량 메타 (차량_마스터 → CAR_META_JSON) ──────────────────────────
+// rows: 헤더를 뺀 차량_마스터 값.
+// 열: A 차량번호 | B 차종 | C (메모, 미사용) | D 법인명 | E 사업자번호 | F 반납일
+// 차량번호는 trim — 시트명·QR 파라미터와 공백 차이로 어긋나지 않게.
+function _buildCarMeta(rows) {
+  const carMeta = {};
+  rows.forEach((r) => {
+    const carNo = String(r[0] == null ? "" : r[0]).trim();
+    if (!carNo) return;
+    carMeta[carNo] = {
+      차종: r[1] || "",
+      법인명: r[3] || "",
+      사업자번호: r[4] || "",
+      반납일: normalizeReturnDate(r[5]),
+    };
+  });
+  return carMeta;
+}
+
+// ── 차량 반납·추가 반영 (필요할 때 수동 실행) ─────────────────────────
+// 차량_마스터를 기준으로 차량 탭과 CAR_META_JSON 을 맞춘다. 여러 번 실행해도 결과 동일.
+// - 반납일 있음        → 차량 탭 숨김 (삭제·이름 변경 안 함: 04:00 재정렬·백업 유지)
+// - 반납일 없음 + 숨김 → 숨김 해제 (반납 취소)
+// - 탭 없음            → 차량_양식 복제로 생성, 15행 이하 비움 (직전 계기판 오염 방지)
+// 반납 판정(입력 차단) 자체는 isRetiredCar 의 날짜 규칙을 따른다 — 숨김은 화면용.
+function syncCarRegistry() {
+  const ss = getSpreadsheet();
+  const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
+  const carMeta = _buildCarMeta(masterSh.getDataRange().getValues().slice(1));
+  const carNos = Object.keys(carMeta);
+
+  // 바꾸기 전에 검증 — 중간에 실패해 일부 차량만 반영되는 상태를 만들지 않는다.
+  const toCreate = carNos.filter(
+    (c) => !carMeta[c].반납일 && !ss.getSheetByName(c),
+  );
+  const template = ss.getSheetByName(CONFIG.SHEET_CAR_TEMPLATE);
+  if (toCreate.length > 0 && !template) {
+    throw new Error(
+      "차량_양식 시트가 없습니다. 기존 차량 탭을 복제해 15행 이하와 머리말의 차량 정보를 " +
+        "비우고 이름을 차량_양식으로 바꾼 뒤 다시 실행하세요.",
+    );
+  }
+
+  const headerCell = masterSh.getRange(1, 6);
+  if (String(headerCell.getValue()).trim() === "") headerCell.setValue("반납일");
+
+  const result = { created: [], hidden: [], shown: [], warnings: [] };
+  carNos.forEach((carNo) => {
+    const 반납일 = carMeta[carNo].반납일;
+    const sh = ss.getSheetByName(carNo);
+
+    if (반납일) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(반납일)) {
+        result.warnings.push(
+          `${carNo}: 반납일 "${반납일}" 은 날짜 형식이 아니어서 즉시 반납으로 처리됩니다.`,
+        );
+      }
+      if (sh && !sh.isSheetHidden()) {
+        sh.hideSheet();
+        result.hidden.push(carNo);
+      }
+      return;
+    }
+
+    if (sh) {
+      if (sh.isSheetHidden()) {
+        sh.showSheet();
+        result.shown.push(carNo);
+      }
+      return;
+    }
+
+    const created = template.copyTo(ss).setName(carNo);
+    const lastRow = created.getLastRow();
+    if (lastRow >= CONFIG.DATA_START_ROW) {
+      created
+        .getRange(
+          CONFIG.DATA_START_ROW,
+          1,
+          lastRow - CONFIG.DATA_START_ROW + 1,
+          CAR_TOTAL_COLS,
+        )
+        .clearContent();
+    }
+    created.showSheet();
+    result.created.push(carNo);
+  });
+
+  PropertiesService.getScriptProperties().setProperty(
+    "CAR_META_JSON",
+    JSON.stringify(carMeta),
+  );
+  const cache = CacheService.getScriptCache();
+  cache.remove("parking_board");
+  cache.removeAll(carNos.map(_prevOdoCacheKey));
+
+  Logger.log(
+    `syncCarRegistry: 생성 [${result.created.join(", ")}] · 숨김 [${result.hidden.join(", ")}] · ` +
+      `숨김 해제 [${result.shown.join(", ")}] · 차량 메타 ${carNos.length}대`,
+  );
+  result.warnings.forEach((w) => Logger.log("경고: " + w));
+  return result;
 }
 
 // ── 주차현황 보드 서빙 ────────────────────────────────────────────────

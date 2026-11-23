@@ -127,6 +127,9 @@ function loadGas(overrides = {}) {
 
 function makeSheet(name, grid = []) {
   const g = grid.map((r) => r.slice());
+  let sheetName = name;
+  let hidden = false;
+  let owner = null; // 소속 가짜 스프레드시트 — setName 시 이름 맵 갱신용
 
   const ensure = (rows, cols) => {
     while (g.length < rows) g.push([]);
@@ -136,8 +139,35 @@ function makeSheet(name, grid = []) {
   const isBlank = (v) => v === "" || v === null || v === undefined;
 
   const sheet = {
-    getName: () => name,
+    getName: () => sheetName,
     _grid: g,
+    _attach(ss) {
+      owner = ss;
+    },
+
+    hideSheet() {
+      hidden = true;
+      return sheet;
+    },
+    showSheet() {
+      hidden = false;
+      return sheet;
+    },
+    isSheetHidden: () => hidden,
+
+    setName(newName) {
+      if (owner) owner._rename(sheetName, newName);
+      sheetName = newName;
+      return sheet;
+    },
+
+    // GAS 처럼 대상 스프레드시트에 "Copy of <name>" 으로 추가. 숨김 상태도 복사.
+    copyTo(targetSs) {
+      const copy = makeSheet(`Copy of ${sheetName}`, g);
+      if (hidden) copy.hideSheet();
+      targetSs._add(copy);
+      return copy;
+    },
 
     getLastRow() {
       for (let i = g.length - 1; i >= 0; i--) {
@@ -164,6 +194,10 @@ function makeSheet(name, grid = []) {
         },
         getValue() {
           return g[row - 1][col - 1];
+        },
+        setValue(v) {
+          g[row - 1][col - 1] = v;
+          return this;
         },
         setValues(values) {
           for (let i = 0; i < numRows; i++) {
@@ -193,11 +227,22 @@ function makeSheet(name, grid = []) {
 
 function makeSpreadsheet(sheetsByName) {
   const sheets = sheetsByName;
-  return {
+  const ss = {
     getSheetByName: (n) => sheets[n] || null,
     getSheets: () => Object.values(sheets),
     _sheets: sheets,
+    _add(sheet) {
+      sheets[sheet.getName()] = sheet;
+      sheet._attach(ss);
+    },
+    _rename(oldName, newName) {
+      const sh = sheets[oldName];
+      delete sheets[oldName];
+      sheets[newName] = sh;
+    },
   };
+  Object.values(sheets).forEach((sh) => sh._attach(ss));
+  return ss;
 }
 
 // 시트 I/O 까지 포함해 Code.js 를 로드. scriptProps 는 스크립트 속성 초기값.
