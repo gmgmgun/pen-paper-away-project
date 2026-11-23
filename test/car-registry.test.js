@@ -24,9 +24,18 @@ function carTabGrid(header, odo) {
   return grid;
 }
 
-function registryFixture({ rows, withTemplate = true }) {
+const CONFIG_FILE = JSON.stringify({
+  staff: [],
+  fixedUser: {},
+  businessTripCars: [],
+  clients: [],
+});
+
+function registryFixture({ rows, withTemplate = true, fHeader = "" }) {
+  const header = MASTER_HEADER.slice();
+  header[5] = fHeader;
   const sheets = {
-    [MASTER]: makeSheet(MASTER, [MASTER_HEADER, ...rows]),
+    [MASTER]: makeSheet(MASTER, [header, ...rows]),
     [OLD_CAR]: makeSheet(OLD_CAR, carTabGrid("운행기록부", 1000)),
   };
   if (withTemplate) {
@@ -37,6 +46,7 @@ function registryFixture({ rows, withTemplate = true }) {
   return loadGasWithSheets({
     sheets,
     scriptProps: { CAR_META_JSON: "{}" },
+    files: { config: CONFIG_FILE },
   });
 }
 
@@ -174,4 +184,50 @@ test("_buildCarMeta: 빈 차량번호 행은 건너뛰고 Date 반납일을 정�
     사업자번호: "123-45-67890",
     반납일: "2026-11-30",
   });
+});
+
+// ── F열 보호: 다른 용도로 쓰이던 F열을 반납일로 오인하면 전 차량이 차단된다 ──
+
+test("F1 이 반납일이 아닌 다른 헤더면 syncCarRegistry 는 아무것도 바꾸기 전에 throw", () => {
+  const { gas, ss, props } = registryFixture({
+    rows: [masterRow(OLD_CAR, "리스 만기 2027-03")],
+    fHeader: "비고",
+  });
+
+  assert.throws(() => gas.syncCarRegistry(), /F1/);
+
+  assert.equal(props.CAR_META_JSON, "{}");
+  assert.equal(ss.getSheetByName(OLD_CAR).isSheetHidden(), false);
+});
+
+test("F1 이 다른 헤더면 setupProperties 도 throw 해 전 차량 차단을 막는다", () => {
+  const { gas, props } = registryFixture({
+    rows: [masterRow(OLD_CAR, "리스 만기 2027-03")],
+    fHeader: "비고",
+  });
+
+  assert.throws(() => gas.setupProperties(), /F1/);
+
+  assert.equal(props.CAR_META_JSON, "{}");
+});
+
+test("F1 이 반납일이면 setupProperties 는 정상 동작한다", () => {
+  const { gas, props } = registryFixture({
+    rows: [masterRow(OLD_CAR, "2026-11-30")],
+    fHeader: "반납일",
+  });
+
+  gas.setupProperties();
+
+  assert.equal(meta(props)[OLD_CAR].반납일, "2026-11-30");
+});
+
+test("setupProperties 도 날짜가 아닌 반납일을 경고 로그로 남긴다", () => {
+  const { gas } = registryFixture({ rows: [masterRow(OLD_CAR, "반납")] });
+
+  gas.setupProperties();
+
+  assert.ok(
+    gas.Logger._logs.some((l) => l.includes("경고") && l.includes(OLD_CAR)),
+  );
 });

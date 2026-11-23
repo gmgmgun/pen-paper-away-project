@@ -898,8 +898,7 @@ function setupProperties() {
 
   const ss = SpreadsheetApp.openById(ssId);
   const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
-  const masterData = masterSh.getDataRange().getValues().slice(1);
-  const carMeta = _buildCarMeta(masterData);
+  const { carMeta, warnings } = _readCarMaster(masterSh);
   props.setProperty("CAR_META_JSON", JSON.stringify(carMeta));
   // 반납일 변경이 30분 TTL 캐시에 가려지지 않도록 보드 캐시를 비운다.
   CacheService.getScriptCache().remove("parking_board");
@@ -913,6 +912,7 @@ function setupProperties() {
       Object.keys(carMeta).length +
       "대 캐싱",
   );
+  warnings.forEach((w) => Logger.log("경고: " + w));
 }
 
 // ── 차량 메타 (차량_마스터 → CAR_META_JSON) ──────────────────────────
@@ -934,6 +934,35 @@ function _buildCarMeta(rows) {
   return carMeta;
 }
 
+// 차량_마스터 시트 → { carMeta, warnings }. setupProperties / syncCarRegistry 공용.
+// F열은 반납일 전용 — F1 에 다른 헤더가 있으면 기존 F열 데이터를 반납일로 오인해
+// 전 차량이 차단되므로, CAR_META_JSON 을 쓰기 전에 중단한다.
+function _readCarMaster(masterSh) {
+  const values = masterSh.getDataRange().getValues();
+  const fHeader = String((values[0] && values[0][5]) || "").trim();
+  if (fHeader && fHeader !== "반납일") {
+    throw new Error(
+      `차량_마스터 F1 이 "${fHeader}" 입니다. F열은 반납일 전용입니다 — ` +
+        `기존 F열 데이터를 다른 열로 옮기고 F1 을 비우거나 "반납일"로 바꾼 뒤 다시 실행하세요.`,
+    );
+  }
+  const carMeta = _buildCarMeta(values.slice(1));
+  return { carMeta, warnings: _returnDateWarnings(carMeta) };
+}
+
+// 날짜 형식이 아닌 반납일은 isRetiredCar 가 즉시 반납으로 보므로 실행 로그로 알린다.
+function _returnDateWarnings(carMeta) {
+  return Object.keys(carMeta)
+    .filter((carNo) => {
+      const 반납일 = carMeta[carNo].반납일;
+      return 반납일 && !/^\d{4}-\d{2}-\d{2}$/.test(반납일);
+    })
+    .map(
+      (carNo) =>
+        `${carNo}: 반납일 "${carMeta[carNo].반납일}" 은 날짜 형식이 아니어서 즉시 반납으로 처리됩니다.`,
+    );
+}
+
 // ── 차량 반납·추가 반영 (필요할 때 수동 실행) ─────────────────────────
 // 차량_마스터를 기준으로 차량 탭과 CAR_META_JSON 을 맞춘다. 여러 번 실행해도 결과 동일.
 // - 반납일 있음        → 차량 탭 숨김 (삭제·이름 변경 안 함: 04:00 재정렬·백업 유지)
@@ -943,7 +972,7 @@ function _buildCarMeta(rows) {
 function syncCarRegistry() {
   const ss = getSpreadsheet();
   const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
-  const carMeta = _buildCarMeta(masterSh.getDataRange().getValues().slice(1));
+  const { carMeta, warnings } = _readCarMaster(masterSh);
   const carNos = Object.keys(carMeta);
 
   // 바꾸기 전에 검증 — 중간에 실패해 일부 차량만 반영되는 상태를 만들지 않는다.
@@ -961,17 +990,12 @@ function syncCarRegistry() {
   const headerCell = masterSh.getRange(1, 6);
   if (String(headerCell.getValue()).trim() === "") headerCell.setValue("반납일");
 
-  const result = { created: [], hidden: [], shown: [], warnings: [] };
+  const result = { created: [], hidden: [], shown: [], warnings };
   carNos.forEach((carNo) => {
     const 반납일 = carMeta[carNo].반납일;
     const sh = ss.getSheetByName(carNo);
 
     if (반납일) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(반납일)) {
-        result.warnings.push(
-          `${carNo}: 반납일 "${반납일}" 은 날짜 형식이 아니어서 즉시 반납으로 처리됩니다.`,
-        );
-      }
       if (sh && !sh.isSheetHidden()) {
         sh.hideSheet();
         result.hidden.push(carNo);

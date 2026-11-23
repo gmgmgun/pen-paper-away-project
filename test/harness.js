@@ -246,7 +246,8 @@ function makeSpreadsheet(sheetsByName) {
 }
 
 // 시트 I/O 까지 포함해 Code.js 를 로드. scriptProps 는 스크립트 속성 초기값.
-function loadGasWithSheets({ sheets, scriptProps = {} }) {
+// files: HtmlService.createHtmlOutputFromFile 이 돌려줄 파일 내용 (예: { config: "{...}" })
+function loadGasWithSheets({ sheets, scriptProps = {}, files = {} }) {
   const ss = makeSpreadsheet(sheets);
   const props = Object.assign({ SPREADSHEET_ID: "fake-ss-id" }, scriptProps);
   const cache = new Map();
@@ -282,6 +283,10 @@ function loadGasWithSheets({ sheets, scriptProps = {} }) {
     // createHtmlOutput 경로만 지원. 템플릿(createTemplateFromFile)은 파일 로드가
     // 필요해 스텁하지 않는다 — 호출되면 TypeError 로 드러난다.
     HtmlService: {
+      createHtmlOutputFromFile: (name) => {
+        if (!(name in files)) throw new Error(`HtmlService 스텁: 파일 없음 ${name}`);
+        return { getContent: () => files[name] };
+      },
       createHtmlOutput: (html) => {
         const out = {
           getContent: () => String(html),
