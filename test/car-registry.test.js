@@ -3,8 +3,8 @@ const assert = require("node:assert/strict");
 const { loadGas, loadGasWithSheets, makeSheet, parseDate } = require("./harness");
 
 const MASTER = "차량_마스터";
-const TEMPLATE = "차량_양식";
 const OLD_CAR = "12가3456";
+const ACTIVE_CAR = "34나5678";
 const NEW_CAR = "78라1234";
 const MASTER_HEADER = ["차량번호", "차종", "메모", "법인명", "사업자번호", ""];
 
@@ -31,18 +31,17 @@ const CONFIG_FILE = JSON.stringify({
   clients: [],
 });
 
-function registryFixture({ rows, withTemplate = true, fHeader = "" }) {
+// OLD_CAR 탭은 항상 있다(15행 주행후 1000). extraTabs 로 다른 차량 탭을 더 둘 수 있다.
+function registryFixture({ rows, fHeader = "", extraTabs = {} }) {
   const header = MASTER_HEADER.slice();
   header[5] = fHeader;
   const sheets = {
     [MASTER]: makeSheet(MASTER, [header, ...rows]),
     [OLD_CAR]: makeSheet(OLD_CAR, carTabGrid("운행기록부", 1000)),
   };
-  if (withTemplate) {
-    // 양식에 15행 잔재(999)가 남아 있는 상황을 일부러 만든다
-    sheets[TEMPLATE] = makeSheet(TEMPLATE, carTabGrid("운행기록부", 999));
-    sheets[TEMPLATE].hideSheet();
-  }
+  Object.entries(extraTabs).forEach(([name, grid]) => {
+    sheets[name] = makeSheet(name, grid);
+  });
   return loadGasWithSheets({
     sheets,
     scriptProps: { CAR_META_JSON: "{}" },
@@ -76,8 +75,10 @@ test("반납일을 지우면 숨김이 풀린다", () => {
   assert.ok(res.shown.includes(OLD_CAR));
 });
 
-test("신규 차량은 차량_양식 복제로 탭이 생긴다", () => {
-  const { gas, ss, props } = registryFixture({ rows: [masterRow(NEW_CAR)] });
+test("신규 차량은 기존 차량 탭 복제로 탭이 생긴다", () => {
+  const { gas, ss, props } = registryFixture({
+    rows: [masterRow(OLD_CAR), masterRow(NEW_CAR)],
+  });
 
   const res = gas.syncCarRegistry();
 
@@ -89,17 +90,61 @@ test("신규 차량은 차량_양식 복제로 탭이 생긴다", () => {
   assert.equal(meta(props)[NEW_CAR].차종, "K5");
 });
 
-test("새 탭은 양식의 15행 이하 잔재를 비운다 — 초기값 등록 모드로 열려야 함", () => {
-  const { gas } = registryFixture({ rows: [masterRow(NEW_CAR)] });
+test("새 탭은 원본 탭의 15행 이하 기록을 비운다 — 초기값 등록 모드로 열려야 함", () => {
+  const { gas } = registryFixture({
+    rows: [masterRow(OLD_CAR), masterRow(NEW_CAR)],
+  });
 
   gas.syncCarRegistry();
 
   assert.equal(gas.getPrevOdoData(NEW_CAR).prevOdo, null);
+  assert.equal(gas.getPrevOdoData(OLD_CAR).prevOdo, 1000, "원본 탭은 그대로");
+});
+
+test("리스 교체: 기존 차량 반납과 신규 추가를 한 번에 처리한다", () => {
+  const { gas, ss } = registryFixture({
+    rows: [masterRow(OLD_CAR, "2026-11-30"), masterRow(NEW_CAR)],
+  });
+
+  gas.syncCarRegistry();
+
+  assert.equal(ss.getSheetByName(OLD_CAR).isSheetHidden(), true);
+  assert.equal(ss.getSheetByName(NEW_CAR).isSheetHidden(), false);
+  assert.equal(gas.getPrevOdoData(NEW_CAR).prevOdo, null);
+});
+
+test("복제 원본은 반납 안 된 차량 탭을 우선한다", () => {
+  const { gas, ss } = registryFixture({
+    rows: [
+      masterRow(OLD_CAR, "2026-11-30"),
+      masterRow(ACTIVE_CAR),
+      masterRow(NEW_CAR),
+    ],
+    extraTabs: { [ACTIVE_CAR]: carTabGrid("현행양식", 2000) },
+  });
+
+  gas.syncCarRegistry();
+
+  assert.equal(ss.getSheetByName(NEW_CAR).getRange(1, 1).getValue(), "현행양식");
+});
+
+test("새 탭을 만들면 머리말 수정 안내를 원본 차량과 함께 로그에 남긴다", () => {
+  const { gas } = registryFixture({
+    rows: [masterRow(OLD_CAR), masterRow(NEW_CAR)],
+  });
+
+  gas.syncCarRegistry();
+
+  assert.ok(
+    gas.Logger._logs.some(
+      (l) => l.includes("머리말") && l.includes(NEW_CAR) && l.includes(OLD_CAR),
+    ),
+  );
 });
 
 test("차량번호 앞뒤 공백은 trim 한다", () => {
   const { gas, ss, props } = registryFixture({
-    rows: [masterRow(` ${NEW_CAR} `)],
+    rows: [masterRow(OLD_CAR), masterRow(` ${NEW_CAR} `)],
   });
 
   gas.syncCarRegistry();
@@ -141,25 +186,18 @@ test("F1 헤더가 비면 반납일을 쓴다", () => {
   assert.equal(ss.getSheetByName(MASTER).getRange(1, 6).getValue(), "반납일");
 });
 
-test("차량_양식이 없는데 만들 탭이 있으면 아무것도 바꾸기 전에 throw", () => {
-  const { gas, ss, props } = registryFixture({
-    rows: [masterRow(OLD_CAR, "2026-11-30"), masterRow(NEW_CAR)],
-    withTemplate: false,
-  });
+test("복제할 기존 차량 탭이 없으면 아무것도 바꾸기 전에 throw", () => {
+  // OLD_CAR 탭은 있지만 마스터에 없으므로 원본 후보가 아니다
+  const { gas, ss, props } = registryFixture({ rows: [masterRow(NEW_CAR)] });
 
-  assert.throws(() => gas.syncCarRegistry(), /차량_양식/);
+  assert.throws(
+    () => gas.syncCarRegistry(),
+    (e) => /원본/.test(e.message) && e.message.includes(NEW_CAR),
+  );
 
   assert.equal(props.CAR_META_JSON, "{}");
-  assert.equal(ss.getSheetByName(OLD_CAR).isSheetHidden(), false);
-});
-
-test("만들 탭이 없으면 차량_양식이 없어도 동작한다", () => {
-  const { gas } = registryFixture({
-    rows: [masterRow(OLD_CAR)],
-    withTemplate: false,
-  });
-
-  assert.doesNotThrow(() => gas.syncCarRegistry());
+  assert.equal(ss.getSheetByName(MASTER).getRange(1, 6).getValue(), "");
+  assert.equal(ss.getSheetByName(NEW_CAR), null);
 });
 
 test("_buildCarMeta: 빈 차량번호 행은 건너뛰고 Date 반납일을 정규화한다", () => {

@@ -16,7 +16,6 @@
 const CONFIG = {
   SHEET_RAW: "RAW_운행일지",
   SHEET_MASTER: "차량_마스터",
-  SHEET_CAR_TEMPLATE: "차량_양식", // 새 차량 탭 원본 (syncCarRegistry)
   MAX_DAILY_KM: 500,
   GAP_ALERT_DAYS: 3,
   DATA_START_ROW: 15,
@@ -708,11 +707,7 @@ function syncAllCarSheets() {
 // [사용법]
 // setupExportTrigger() 를 1회 수동 실행 → 이후 매월 1일 자정(KST) 자동 실행
 //
-const EXPORT_EXCLUDE_SHEETS = [
-  "RAW_운행일지",
-  "차량_마스터",
-  CONFIG.SHEET_CAR_TEMPLATE,
-];
+const EXPORT_EXCLUDE_SHEETS = ["RAW_운행일지", "차량_마스터"];
 
 function exportToExcel() {
   const ss = getSpreadsheet();
@@ -967,7 +962,8 @@ function _returnDateWarnings(carMeta) {
 // 차량_마스터를 기준으로 차량 탭과 CAR_META_JSON 을 맞춘다. 여러 번 실행해도 결과 동일.
 // - 반납일 있음        → 차량 탭 숨김 (삭제·이름 변경 안 함: 04:00 재정렬·백업 유지)
 // - 반납일 없음 + 숨김 → 숨김 해제 (반납 취소)
-// - 탭 없음            → 차량_양식 복제로 생성, 15행 이하 비움 (직전 계기판 오염 방지)
+// - 탭 없음            → 기존 차량 탭 복제로 생성, 15행 이하 비움 (직전 계기판 오염 방지)
+//                        머리말(1~14행)은 원본 차량 값이 남으므로 손으로 고친다 — 코드는 머리말을 읽지 않는다
 // 반납 판정(입력 차단) 자체는 isRetiredCar 의 날짜 규칙을 따른다 — 숨김은 화면용.
 function syncCarRegistry() {
   const ss = getSpreadsheet();
@@ -979,13 +975,17 @@ function syncCarRegistry() {
   const toCreate = carNos.filter(
     (c) => !carMeta[c].반납일 && !ss.getSheetByName(c),
   );
-  const template = ss.getSheetByName(CONFIG.SHEET_CAR_TEMPLATE);
-  if (toCreate.length > 0 && !template) {
+  // 복제 원본: 반납 안 된 차량 탭 우선(최신 양식일 가능성이 높다), 없으면 반납 차량 탭
+  const sourceCar =
+    carNos.find((c) => !carMeta[c].반납일 && ss.getSheetByName(c)) ||
+    carNos.find((c) => ss.getSheetByName(c));
+  if (toCreate.length > 0 && !sourceCar) {
     throw new Error(
-      "차량_양식 시트가 없습니다. 기존 차량 탭을 복제해 15행 이하와 머리말의 차량 정보를 " +
-        "비우고 이름을 차량_양식으로 바꾼 뒤 다시 실행하세요.",
+      `새 탭을 만들 원본이 없습니다 — 차량_마스터의 차량 중 탭이 있는 차량이 없습니다. ` +
+        `기존 차량 탭 이름이 마스터 A열과 같은지 확인하세요. (생성 대상: ${toCreate.join(", ")})`,
     );
   }
+  const source = sourceCar ? ss.getSheetByName(sourceCar) : null;
 
   const headerCell = masterSh.getRange(1, 6);
   if (String(headerCell.getValue()).trim() === "") headerCell.setValue("반납일");
@@ -1011,7 +1011,7 @@ function syncCarRegistry() {
       return;
     }
 
-    const created = template.copyTo(ss).setName(carNo);
+    const created = source.copyTo(ss).setName(carNo);
     const lastRow = created.getLastRow();
     if (lastRow >= CONFIG.DATA_START_ROW) {
       created
@@ -1039,6 +1039,12 @@ function syncCarRegistry() {
     `syncCarRegistry: 생성 [${result.created.join(", ")}] · 숨김 [${result.hidden.join(", ")}] · ` +
       `숨김 해제 [${result.shown.join(", ")}] · 차량 메타 ${carNos.length}대`,
   );
+  if (result.created.length > 0) {
+    Logger.log(
+      `새 탭 [${result.created.join(", ")}] 은 ${sourceCar} 탭을 복제했습니다 — ` +
+        `머리말(1~14행)의 차량 정보를 새 차량으로 고치세요.`,
+    );
+  }
   result.warnings.forEach((w) => Logger.log("경고: " + w));
   return result;
 }
