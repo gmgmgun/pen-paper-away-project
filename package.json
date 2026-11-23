@@ -1,0 +1,8 @@
+{
+  "name": "pen-paper-away-project",
+  "private": true,
+  "description": "PPAP 운행일지 — GAS 로직 단위테스트 (배포 대상 아님, .claspignore 로 제외)",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\""
+  }
+}

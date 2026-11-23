@@ -123,9 +123,31 @@ function serveForm(e) {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+// ── 반납 차량 판정 ────────────────────────────────────────────────────
+// 차량_마스터 F열(반납일) 값을 CAR_META_JSON 에 담기 위한 정규화.
+// 날짜 셀은 Date 로 읽히는데 JSON.stringify 하면 UTC ISO 문자열이 되어
+// KST 자정이 전날로 밀리므로, KST 기준 yyyy-MM-dd 로 고정한다.
+function normalizeReturnDate(value) {
+  if (Object.prototype.toString.call(value) === "[object Date]") {
+    if (isNaN(value.getTime())) return "";
+    return Utilities.formatDate(value, "Asia/Seoul", "yyyy-MM-dd");
+  }
+  return String(value == null ? "" : value).trim();
+}
+
+// 반납일이 yyyy-MM-dd 면 그 다음 날부터 반납으로 본다 — 반납일 당일은 반납하러
+// 가는 운행도 기록해야 하므로 허용. 미래 날짜를 미리 입력해 둬도 된다.
+// 날짜가 아닌 값(예: "반납")은 즉시 반납으로 본다.
+function isRetiredCar(반납일, todayStr) {
+  if (!반납일) return false;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(반납일)) return 반납일 < todayStr;
+  return true;
+}
+
 // ── READ: RAW 시트에서 차량별 최근 주차 현황 조회 ────────────────────
 //
 // 초기값등록 행은 운전자 정보가 없으므로 제외
+// 반납 차량(차량_마스터 F열 반납일)은 제외 — RAW 이력은 그대로 두고 보드에서만 뺀다
 // 차량번호별로 타임스탬프 기준 가장 최근 행만 추출
 //
 function _buildParkingBoard() {
@@ -137,11 +159,15 @@ function _buildParkingBoard() {
   const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
   const allData = rawSh.getDataRange().getValues().slice(1); // 헤더 제외
 
+  const now = new Date();
+  const todayStr = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
+
   const latestMap = {};
   allData.forEach((r) => {
     const carNo = String(r[COL.차량번호]).trim();
     if (!carNo) return;
     if (String(r[COL.플래그]).includes("초기값등록")) return;
+    if (isRetiredCar(carMeta[carNo]?.반납일, todayStr)) return;
 
     const ts = r[COL.타임스탬프];
     // 문자열/Date 혼합 대비: getTime() 으로 정규화
@@ -159,8 +185,6 @@ function _buildParkingBoard() {
   });
 
   // 시간 포맷: 오늘이면 "오늘 HH:mm", 어제면 "어제 HH:mm", 그 외 "MM/dd HH:mm"
-  const now = new Date();
-  const todayStr = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayStr = Utilities.formatDate(
@@ -835,6 +859,7 @@ function setupProperties() {
   const ss = SpreadsheetApp.openById(ssId);
   const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
   const masterData = masterSh.getDataRange().getValues().slice(1);
+  // 열: A 차량번호 | B 차종 | C (메모, 미사용) | D 법인명 | E 사업자번호 | F 반납일
   const carMeta = {};
   masterData.forEach((r) => {
     if (r[0]) {
@@ -842,10 +867,13 @@ function setupProperties() {
         차종: r[1] || "",
         법인명: r[3] || "",
         사업자번호: r[4] || "",
+        반납일: normalizeReturnDate(r[5]),
       };
     }
   });
   props.setProperty("CAR_META_JSON", JSON.stringify(carMeta));
+  // 반납일 변경이 30분 TTL 캐시에 가려지지 않도록 보드 캐시를 비운다.
+  CacheService.getScriptCache().remove("parking_board");
 
   Logger.log(
     "설정 완료: 직원 " +
