@@ -234,6 +234,20 @@ function loadGasWithSheets({ sheets, scriptProps = {} }) {
         releaseLock: () => {},
       }),
     },
+    // createHtmlOutput 경로만 지원. 템플릿(createTemplateFromFile)은 파일 로드가
+    // 필요해 스텁하지 않는다 — 호출되면 TypeError 로 드러난다.
+    HtmlService: {
+      createHtmlOutput: (html) => {
+        const out = {
+          getContent: () => String(html),
+          setTitle: () => out,
+          addMetaTag: () => out,
+          setXFrameOptionsMode: () => out,
+        };
+        return out;
+      },
+      XFrameOptionsMode: { ALLOWALL: "ALLOWALL" },
+    },
   });
 
   return { gas, ss, cache, props };

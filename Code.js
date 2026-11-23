@@ -106,6 +106,22 @@ function serveForm(e) {
   };
 
   const carNo = e && e.parameter && e.parameter.car ? e.parameter.car : "";
+
+  // 반납 차량은 폼 대신 안내만. 차 안에 남은 QR·주차 보드 링크로 들어오는 경우.
+  // carNo 가 CAR_META_JSON 키와 일치할 때만 여기 오므로 이스케이프 불필요.
+  const 반납일 = carNo ? retiredReturnDate(carNo, props, new Date()) : "";
+  if (반납일) {
+    return HtmlService.createHtmlOutput(
+      `<div style="font-family:sans-serif;padding:32px 20px;text-align:center">` +
+        `<h2>${carNo}</h2>` +
+        `<p>반납된 차량입니다 (반납일 ${반납일}).</p>` +
+        `</div>`,
+    )
+      .setTitle("반납된 차량")
+      .addMetaTag("viewport", "width=device-width, initial-scale=1")
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
   const prevOdoData = carNo
     ? getPrevOdoData(carNo, props)
     : { prevOdo: null, prevDate: null, carName: "" };
@@ -142,6 +158,23 @@ function isRetiredCar(반납일, todayStr) {
   if (!반납일) return false;
   if (/^\d{4}-\d{2}-\d{2}$/.test(반납일)) return 반납일 < todayStr;
   return true;
+}
+
+// 반납 차량이면 CAR_META_JSON 의 반납일, 아니면 "".
+function retiredReturnDate(carNo, props, now) {
+  const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
+  const 반납일 = carMeta[carNo]?.반납일 || "";
+  const todayStr = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
+  return isRetiredCar(반납일, todayStr) ? 반납일 : "";
+}
+
+// 저장 경로 차단. 반납 전에 폼을 열어 두고 반납 후 제출하는 경우까지 막는다.
+// 모든 쓰기보다 먼저 호출해야 RAW·차량 탭에 흔적이 남지 않는다.
+function assertCarActive(carNo, props, now) {
+  const 반납일 = retiredReturnDate(carNo, props, now);
+  if (반납일) {
+    throw new Error(`반납된 차량입니다 (반납일 ${반납일}).`);
+  }
 }
 
 // ── READ: RAW 시트에서 차량별 최근 주차 현황 조회 ────────────────────
@@ -347,6 +380,7 @@ function saveRecord(payload) {
     const 주차위치 = payload.parking || "";
 
     const props = getAllScriptProps();
+    assertCarActive(차량번호, props, now);
     const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
     const 차종 = carMeta[차량번호]?.차종 || "";
 
@@ -480,6 +514,7 @@ function _updateRecordInner(payload) {
   const 주차위치 = payload.parking || "";
 
   const props = getAllScriptProps();
+  assertCarActive(차량번호, props, now);
   const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
   const 차종 = carMeta[차량번호]?.차종 || "";
 
