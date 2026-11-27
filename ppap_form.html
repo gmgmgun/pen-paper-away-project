@@ -1216,11 +1216,10 @@
             "새 차량이거나 기록이 없습니다.";
           document.getElementById("firstRecordBanner").style.display = "block";
           document.getElementById("submitBtn").textContent = "초기값 등록하기";
-          // 최초 등록 시 주차위치 제외한 나머지 카드만 비활성화
+          // 최초 등록 시 계기판·주차위치 제외한 나머지 카드만 비활성화 (초기값 = 현재 계기판 수치, 필수)
           [
             "fieldNameCard",
             "fieldTypeCard",
-            "fieldOdoCard",
             "fieldNoteCard",
           ].forEach((id) => {
             const c = document.getElementById(id);
