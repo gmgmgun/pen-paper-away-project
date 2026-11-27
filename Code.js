@@ -16,6 +16,8 @@
 const CONFIG = {
   SHEET_RAW: "RAW_운행일지",
   SHEET_MASTER: "차량_마스터",
+  SHEET_STAFF: "직원",
+  SHEET_CLIENTS: "거래처",
   MAX_DAILY_KM: 500,
   GAP_ALERT_DAYS: 3,
   DATA_START_ROW: 15,
@@ -59,6 +61,12 @@ const CAR_TOTAL_COLS = 44;
 function getSpreadsheet() {
   const id =
     PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
+  // 코드에 기본 ID 를 두지 않는다 — 빠졌을 때 다른 환경(운영) 시트를 건드리지 않고 바로 멈추게.
+  if (!id) {
+    throw new Error(
+      "SPREADSHEET_ID 스크립트 속성이 없습니다 — 프로젝트 설정 → 스크립트 속성에 이 환경의 스프레드시트 ID 를 넣으세요.",
+    );
+  }
   return SpreadsheetApp.openById(id);
 }
 
@@ -106,6 +114,22 @@ function serveForm(e) {
   };
 
   const carNo = e && e.parameter && e.parameter.car ? e.parameter.car : "";
+
+  // 반납 차량은 폼 대신 안내만. 차 안에 남은 QR·주차 보드 링크로 들어오는 경우.
+  // carNo 가 CAR_META_JSON 키와 일치할 때만 여기 오므로 이스케이프 불필요.
+  const 반납일 = carNo ? retiredReturnDate(carNo, props, new Date()) : "";
+  if (반납일) {
+    return HtmlService.createHtmlOutput(
+      `<div style="font-family:sans-serif;padding:32px 20px;text-align:center">` +
+        `<h2>${carNo}</h2>` +
+        `<p>반납된 차량입니다 (반납일 ${반납일}).</p>` +
+        `</div>`,
+    )
+      .setTitle("반납된 차량")
+      .addMetaTag("viewport", "width=device-width, initial-scale=1")
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
   const prevOdoData = carNo
     ? getPrevOdoData(carNo, props)
     : { prevOdo: null, prevDate: null, carName: "" };
@@ -123,25 +147,66 @@ function serveForm(e) {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-// ── READ: RAW 시트에서 차량별 최근 주차 현황 조회 ────────────────────
+// ── 반납 차량 판정 ────────────────────────────────────────────────────
+// 차량_마스터 F열(반납일) 값을 CAR_META_JSON 에 담기 위한 정규화.
+// 날짜 셀은 Date 로 읽히는데 JSON.stringify 하면 UTC ISO 문자열이 되어
+// KST 자정이 전날로 밀리므로, KST 기준 yyyy-MM-dd 로 고정한다.
+function normalizeReturnDate(value) {
+  if (Object.prototype.toString.call(value) === "[object Date]") {
+    if (isNaN(value.getTime())) return "";
+    return Utilities.formatDate(value, "Asia/Seoul", "yyyy-MM-dd");
+  }
+  return String(value == null ? "" : value).trim();
+}
+
+// 반납일이 yyyy-MM-dd 면 그 다음 날부터 반납으로 본다 — 반납일 당일은 반납하러
+// 가는 운행도 기록해야 하므로 허용. 미래 날짜를 미리 입력해 둬도 된다.
+// 날짜가 아닌 값(예: "반납")은 즉시 반납으로 본다.
+function isRetiredCar(반납일, todayStr) {
+  if (!반납일) return false;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(반납일)) return 반납일 < todayStr;
+  return true;
+}
+
+// 반납 차량이면 CAR_META_JSON 의 반납일, 아니면 "".
+function retiredReturnDate(carNo, props, now) {
+  const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
+  const 반납일 = carMeta[carNo]?.반납일 || "";
+  const todayStr = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
+  return isRetiredCar(반납일, todayStr) ? 반납일 : "";
+}
+
+// 저장 경로 차단. 반납 전에 폼을 열어 두고 반납 후 제출하는 경우까지 막는다.
+// 모든 쓰기보다 먼저 호출해야 RAW·차량 탭에 흔적이 남지 않는다.
+function assertCarActive(carNo, props, now) {
+  const 반납일 = retiredReturnDate(carNo, props, now);
+  if (반납일) {
+    throw new Error(`반납된 차량입니다 (반납일 ${반납일}).`);
+  }
+}
+
+// ── READ: 차량_마스터 차량별 최근 주차 현황 (위치는 RAW 에서) ─────────
 //
-// 초기값등록 행은 운전자 정보가 없으므로 제외
-// 차량번호별로 타임스탬프 기준 가장 최근 행만 추출
+// 차량 목록은 CAR_META_JSON(차량_마스터 행 순서). RAW 에만 있는 차량번호는 나오지 않는다.
+// 표시 조건: G열 위치기록여부 TRUE(키 없으면 TRUE) + 반납 아님(F열 반납일 다음 날부터 제외)
+// 위치는 차량번호별 타임스탬프 기준 가장 최근 RAW 행. 초기값등록 행도 포함(운전자는 빈칸).
+// RAW 기록이 없으면 미기록 카드(parking·name 빈칸, time "—").
 //
 function _buildParkingBoard() {
   const ss = getSpreadsheet();
   const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
-  if (!rawSh) return [];
 
   const props = getAllScriptProps();
   const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
-  const allData = rawSh.getDataRange().getValues().slice(1); // 헤더 제외
+  const allData = rawSh ? rawSh.getDataRange().getValues().slice(1) : []; // 헤더 제외
+
+  const now = new Date();
+  const todayStr = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
 
   const latestMap = {};
   allData.forEach((r) => {
     const carNo = String(r[COL.차량번호]).trim();
     if (!carNo) return;
-    if (String(r[COL.플래그]).includes("초기값등록")) return;
 
     const ts = r[COL.타임스탬프];
     // 문자열/Date 혼합 대비: getTime() 으로 정규화
@@ -159,8 +224,6 @@ function _buildParkingBoard() {
   });
 
   // 시간 포맷: 오늘이면 "오늘 HH:mm", 어제면 "어제 HH:mm", 그 외 "MM/dd HH:mm"
-  const now = new Date();
-  const todayStr = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayStr = Utilities.formatDate(
@@ -169,7 +232,14 @@ function _buildParkingBoard() {
     "yyyy-MM-dd",
   );
 
-  return Object.values(latestMap).map((item) => {
+  const boardCars = Object.keys(carMeta).filter(
+    (carNo) =>
+      carMeta[carNo].위치기록 !== false &&
+      !isRetiredCar(carMeta[carNo].반납일, todayStr),
+  );
+
+  return boardCars.map((carNo) => {
+    const item = latestMap[carNo] || { carNo, parking: "", name: "", dept: "" };
     let timeLabel = "—";
     if (item.ts) {
       const tsDate = new Date(item.ts);
@@ -323,6 +393,7 @@ function saveRecord(payload) {
     const 주차위치 = payload.parking || "";
 
     const props = getAllScriptProps();
+    assertCarActive(차량번호, props, now);
     const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
     const 차종 = carMeta[차량번호]?.차종 || "";
 
@@ -456,6 +527,7 @@ function _updateRecordInner(payload) {
   const 주차위치 = payload.parking || "";
 
   const props = getAllScriptProps();
+  assertCarActive(차량번호, props, now);
   const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
   const 차종 = carMeta[차량번호]?.차종 || "";
 
@@ -811,51 +883,480 @@ function setupDailyResyncTrigger() {
   Logger.log("dailyResyncCarSheets 트리거 등록 완료 (매일 04:00 KST)");
 }
 
-// ── 초기 설정 (최초 1회 수동 실행) ──────────────────────────────────
-function setupProperties() {
-  const config = JSON.parse(
-    HtmlService.createHtmlOutputFromFile("config").getContent(),
-  );
-  const props = PropertiesService.getScriptProperties();
+// ── 차량 메타 (차량_마스터 → CAR_META_JSON) ──────────────────────────
+// 체크박스 값 해석 (G 위치기록여부, J 출장차량). 체크박스 true 또는 손으로 친 "TRUE"(대소문자·공백 무시)만 TRUE.
+function isChecked(value) {
+  if (value === true) return true;
+  return typeof value === "string" && value.trim().toUpperCase() === "TRUE";
+}
 
-  // 환경 분리: 테스트 GAS 에서는 사전에 SPREADSHEET_ID 를 세팅해두면
-  // 그 값을 그대로 사용. 비어 있으면 운영 ID 로 폴백.
-  const DEFAULT_PROD_ID = "1sgzKrRD47t8429NpSOiaRJHeRCIBPf98TsqIjlGYU9A";
-  const ssId = props.getProperty("SPREADSHEET_ID") || DEFAULT_PROD_ID;
-  props.setProperty("SPREADSHEET_ID", ssId);
-
-  props.setProperty("STAFF_JSON", JSON.stringify(config.staff));
-  props.setProperty("FIXED_USER_JSON", JSON.stringify(config.fixedUser));
-  props.setProperty(
-    "BUSINESS_TRIP_CARS_JSON",
-    JSON.stringify(config.businessTripCars),
-  );
-  props.setProperty("CLIENTS_JSON", JSON.stringify(config.clients || []));
-
-  const ss = SpreadsheetApp.openById(ssId);
-  const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
-  const masterData = masterSh.getDataRange().getValues().slice(1);
+// rows: 헤더를 뺀 차량_마스터 값.
+// 열: A 차량번호 | B 차종 | C (메모, 미사용) | D 법인명 | E 사업자번호 | F 반납일 | G 위치기록여부
+//     | H 전담자 | I 전담자부서 | J 출장차량
+// 차량번호는 trim — 시트명·QR 파라미터와 공백 차이로 어긋나지 않게.
+// hasLocationCol: G1 이 위치기록여부인지. 아직 도입 전(G1 빈칸)이면 모든 차량을 보드에 띄운다.
+function _buildCarMeta(rows, hasLocationCol = false) {
   const carMeta = {};
-  masterData.forEach((r) => {
-    if (r[0]) {
-      carMeta[String(r[0])] = {
-        차종: r[1] || "",
-        법인명: r[3] || "",
-        사업자번호: r[4] || "",
-      };
+  rows.forEach((r) => {
+    const carNo = String(r[0] == null ? "" : r[0]).trim();
+    if (!carNo) return;
+    carMeta[carNo] = {
+      차종: r[1] || "",
+      법인명: r[3] || "",
+      사업자번호: r[4] || "",
+      반납일: normalizeReturnDate(r[5]),
+      위치기록: hasLocationCol ? isChecked(r[6]) : true,
+    };
+  });
+  return carMeta;
+}
+
+// 차량_마스터 시트 → { carMeta, warnings, hasLocationCol, fixedUser, businessTripCars }. syncSettings 가 쓴다.
+// F열은 반납일 전용 — F1 에 다른 헤더가 있으면 기존 F열 데이터를 반납일로 오인해
+// 전 차량이 차단되므로, CAR_META_JSON 을 쓰기 전에 중단한다.
+// G열(위치기록여부)도 같은 이유로 G1 이 빈칸·위치기록여부가 아니면 중단한다.
+function _readCarMaster(masterSh) {
+  const values = masterSh.getDataRange().getValues();
+  const fHeader = String((values[0] && values[0][5]) || "").trim();
+  if (fHeader && fHeader !== "반납일") {
+    throw new Error(
+      `차량_마스터 F1 이 "${fHeader}" 입니다. F열은 반납일 전용입니다 — ` +
+        `기존 F열 데이터를 다른 열로 옮기고 F1 을 비우거나 "반납일"로 바꾼 뒤 다시 실행하세요.`,
+    );
+  }
+  const gHeader = String((values[0] && values[0][6]) || "").trim();
+  if (gHeader && gHeader !== "위치기록여부") {
+    throw new Error(
+      `차량_마스터 G1 이 "${gHeader}" 입니다. G열은 위치기록여부 전용입니다 — ` +
+        `기존 G열 데이터를 다른 열로 옮기고 G1 을 비우거나 "위치기록여부"로 바꾼 뒤 다시 실행하세요.`,
+    );
+  }
+  // G1 이 빈칸인데 G열에 값이 있으면(다른 용도의 값, 또는 도입 후 G1 을 지운 경우)
+  // 첫 sync 마이그레이션이 그 값을 덮어쓴다 — 중단.
+  if (!gHeader) {
+    const idx = values.slice(1).findIndex((r) => {
+      const v = r[6];
+      return v !== "" && v !== null && v !== undefined;
+    });
+    if (idx !== -1) {
+      throw new Error(
+        `차량_마스터 G1 이 비어 있지만 G${idx + 2} 에 값이 있습니다. G열은 위치기록여부 전용입니다 — ` +
+          `체크박스를 쓰던 중이면 G1 을 "위치기록여부"로 되돌리고, 다른 데이터면 다른 열로 옮긴 뒤 다시 실행하세요.`,
+      );
+    }
+  }
+  // H~J(전담자·전담자부서·출장차량)는 설정 시트 이관 뒤에만 있다 — 없으면 props 를 비우지 않게 중단.
+  const settingsHeader = [7, 8, 9].map((i) => _cellText(values[0] && values[0][i]));
+  if (settingsHeader.join("|") !== MASTER_SETTINGS_HEADER.join("|")) {
+    throw new Error(
+      `차량_마스터 H1:J1 이 "${MASTER_SETTINGS_HEADER.join(" | ")}" 가 아닙니다 (지금: "${settingsHeader.join(" | ")}"). ` +
+        `처음이면 migrateConfigToSheets 를 먼저 실행하세요.`,
+    );
+  }
+  const hasLocationCol = gHeader === "위치기록여부";
+  const rows = values.slice(1);
+  const carMeta = _buildCarMeta(rows, hasLocationCol);
+  const { fixedUser, businessTripCars } = _buildMasterSettings(rows);
+  return {
+    carMeta,
+    warnings: _returnDateWarnings(carMeta),
+    hasLocationCol,
+    fixedUser,
+    businessTripCars,
+  };
+}
+
+// ── 설정 시트 (직원 · 거래처 · 차량_마스터 H~J) ─────────────────────────
+// syncSettings 가 읽어 STAFF_JSON · CLIENTS_JSON · FIXED_USER_JSON · BUSINESS_TRIP_CARS_JSON 으로 쓴다.
+const STAFF_HEADER = ["이름", "부서"];
+const CLIENTS_HEADER = ["거래처"];
+const MASTER_SETTINGS_HEADER = ["전담자", "전담자부서", "출장차량"];
+
+function _cellText(v) {
+  return String(v == null ? "" : v).trim();
+}
+
+// rows: 헤더를 뺀 차량_마스터 값. H 전담자가 있는 행만 전담 차량, J 가 체크된 행만 출장 차량(마스터 행 순서).
+function _buildMasterSettings(rows) {
+  const fixedUser = {};
+  const businessTripCars = [];
+  rows.forEach((r) => {
+    const carNo = _cellText(r[0]);
+    if (!carNo) return;
+    const name = _cellText(r[7]);
+    if (name) fixedUser[carNo] = { name, dept: _cellText(r[8]) };
+    if (isChecked(r[9])) businessTripCars.push(carNo);
+  });
+  return { fixedUser, businessTripCars };
+}
+
+// 직원 시트 → { staff: [{name, dept}], warnings }. 이름 빈 행은 건너뛰고 시트 순서(= 폼 드롭다운 순서)를 지킨다.
+function _readStaff(ss) {
+  const sh = ss.getSheetByName(CONFIG.SHEET_STAFF);
+  if (!sh) {
+    throw new Error(
+      `${CONFIG.SHEET_STAFF} 시트가 없습니다 — 처음이면 migrateConfigToSheets 를 먼저 실행하세요.`,
+    );
+  }
+  const values = sh.getDataRange().getValues();
+  const header = [0, 1].map((i) => _cellText(values[0] && values[0][i]));
+  if (header.join("|") !== STAFF_HEADER.join("|")) {
+    throw new Error(
+      `${CONFIG.SHEET_STAFF} 시트 1행이 "${STAFF_HEADER.join(" | ")}" 가 아닙니다 (지금: "${header.join(" | ")}").`,
+    );
+  }
+  const staff = values
+    .slice(1)
+    .map((r) => ({ name: _cellText(r[0]), dept: _cellText(r[1]) }))
+    .filter((p) => p.name);
+  if (staff.length === 0) {
+    throw new Error(
+      `${CONFIG.SHEET_STAFF} 시트에 이름이 없습니다 — 이대로 반영하면 폼의 성명 목록이 비게 됩니다.`,
+    );
+  }
+  const seen = new Set();
+  const dup = new Set();
+  staff.forEach((p) => (seen.has(p.name) ? dup.add(p.name) : seen.add(p.name)));
+  const warnings = [...dup].map(
+    (name) => `직원 "${name}" 이 여러 번 있습니다 — 폼은 첫 행의 부서를 씁니다.`,
+  );
+  return { staff, warnings };
+}
+
+// 거래처 시트 → [거래처]. 빈 행은 건너뛰고 시트 순서(= 폼 선택지 순서)를 지킨다. 비어 있어도 된다.
+function _readClients(ss) {
+  const sh = ss.getSheetByName(CONFIG.SHEET_CLIENTS);
+  if (!sh) {
+    throw new Error(
+      `${CONFIG.SHEET_CLIENTS} 시트가 없습니다 — 처음이면 migrateConfigToSheets 를 먼저 실행하세요.`,
+    );
+  }
+  const values = sh.getDataRange().getValues();
+  const header = _cellText(values[0] && values[0][0]);
+  if (header !== CLIENTS_HEADER[0]) {
+    throw new Error(
+      `${CONFIG.SHEET_CLIENTS} 시트 1행이 "${CLIENTS_HEADER[0]}" 가 아닙니다 (지금: "${header}").`,
+    );
+  }
+  return values
+    .slice(1)
+    .map((r) => _cellText(r[0]))
+    .filter(Boolean);
+}
+
+// 날짜 형식이 아닌 반납일은 isRetiredCar 가 즉시 반납으로 보므로 실행 로그로 알린다.
+function _returnDateWarnings(carMeta) {
+  return Object.keys(carMeta)
+    .filter((carNo) => {
+      const 반납일 = carMeta[carNo].반납일;
+      return 반납일 && !/^\d{4}-\d{2}-\d{2}$/.test(반납일);
+    })
+    .map(
+      (carNo) =>
+        `${carNo}: 반납일 "${carMeta[carNo].반납일}" 은 날짜 형식이 아니어서 즉시 반납으로 처리됩니다.`,
+    );
+}
+
+// G열(위치기록여부) 첫 도입. G1 이 빈칸일 때 syncSettings 가 모든 검증 뒤 한 번 호출한다.
+// 반납 아닌 차량은 체크, 반납 차량·차량번호 빈 행은 해제. 쓴 값으로 carMeta 위치기록을 맞춘다.
+// insertCheckboxes 는 값을 false 로 만들므로 값은 그 뒤에 쓴다.
+function _initLocationColumn(masterSh, carMeta, todayStr) {
+  masterSh.getRange(1, 7).setValue("위치기록여부");
+  const lastRow = masterSh.getLastRow();
+  if (lastRow < 2) return;
+  const values = masterSh
+    .getRange(2, 1, lastRow - 1, 1)
+    .getValues()
+    .map(([v]) => {
+      const carNo = String(v == null ? "" : v).trim();
+      if (!carNo || !carMeta[carNo]) return [false];
+      const tracked = !isRetiredCar(carMeta[carNo].반납일, todayStr);
+      carMeta[carNo].위치기록 = tracked;
+      return [tracked];
+    });
+  masterSh.getRange(2, 7, lastRow - 1, 1).insertCheckboxes().setValues(values);
+}
+
+// RAW 에 기록이 있지만 차량_마스터에 없는 차량번호(trim, 처음 나온 순서, 중복 없음).
+// 보드는 마스터 기준이라 이런 차량은 보드에서 사라진다 — sync 경고로 알린다.
+function _unregisteredRawCars(ss, carMeta) {
+  const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
+  if (!rawSh) return [];
+  const lastRow = rawSh.getLastRow();
+  if (lastRow < 2) return [];
+  const found = new Set();
+  rawSh
+    .getRange(2, COL.차량번호 + 1, lastRow - 1, 1)
+    .getValues()
+    .forEach(([v]) => {
+      const carNo = String(v == null ? "" : v).trim();
+      if (carNo && !Object.prototype.hasOwnProperty.call(carMeta, carNo)) {
+        found.add(carNo);
+      }
+    });
+  return [...found];
+}
+
+// ── 설정 시트 이관 (환경별 1회 수동 실행) ─────────────────────────────
+// 지금 Script Properties 의 STAFF_JSON · CLIENTS_JSON · FIXED_USER_JSON · BUSINESS_TRIP_CARS_JSON 을
+// 직원 · 거래처 시트와 차량_마스터 H~J 로 옮긴다. config.html 이 아니라 props 를 읽으므로 각 환경이 자기 값을 옮기고,
+// 배포로 GAS 의 config.html 이 지워진 뒤에도 실행할 수 있다. props 는 쓰지 않는다 — 이어서 syncSettings 가 시트에서 다시 만든다.
+// 검사를 모두 끝낸 뒤에만 쓴다: STAFF_JSON 없음 · 설정 시트가 이미 있음 · 마스터 H~J 에 값이 있음 → throw.
+function migrateConfigToSheets() {
+  const ss = getSpreadsheet();
+  const props = PropertiesService.getScriptProperties();
+  const staff = JSON.parse(props.getProperty("STAFF_JSON") || "[]");
+  if (!Array.isArray(staff) || staff.length === 0) {
+    throw new Error(
+      "STAFF_JSON 이 비어 있어 옮길 직원이 없습니다 — 이 환경의 Script Properties 를 확인하세요.",
+    );
+  }
+  // 모양 검사도 쓰기 전에 — 중간에 TypeError 로 멈추면 시트만 반쯤 생긴다.
+  const readProp = (key, fallback, ok, shape) => {
+    const v = JSON.parse(props.getProperty(key) || fallback);
+    if (!ok(v)) {
+      throw new Error(
+        `${key} 가 ${shape} 모양이 아닙니다 — 이 환경의 Script Properties 를 확인하세요.`,
+      );
+    }
+    return v;
+  };
+  const fixedUserRaw = readProp(
+    "FIXED_USER_JSON",
+    "{}",
+    (v) => v !== null && typeof v === "object" && !Array.isArray(v),
+    "{차량번호: {name, dept}}",
+  );
+  const tripCars = readProp("BUSINESS_TRIP_CARS_JSON", "[]", Array.isArray, "[차량번호]").map(
+    _cellText,
+  );
+  const clients = readProp("CLIENTS_JSON", "[]", Array.isArray, "[거래처]")
+    .map(_cellText)
+    .filter(Boolean);
+
+  [CONFIG.SHEET_STAFF, CONFIG.SHEET_CLIENTS].forEach((name) => {
+    if (ss.getSheetByName(name)) {
+      throw new Error(
+        `${name} 시트가 이미 있습니다 — 이관은 환경마다 한 번만 합니다. ` +
+          `이관 로그에 "이관 완료" 가 남았으면 syncSettings 를 실행하세요. ` +
+          `중간에 멈췄으면 직원 · 거래처 시트를 지우고 차량_마스터 H~J 를 비운 뒤 다시 이관하세요.`,
+      );
     }
   });
+
+  const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
+  const lastRow = masterSh.getLastRow();
+  // 시트에 아직 없는 열(최대 열 수 밖)은 읽지 않는다 — GAS 는 범위가 시트 밖이면 throw.
+  const existingCols = Math.min(3, masterSh.getMaxColumns() - 7);
+  if (lastRow >= 1 && existingCols > 0) {
+    masterSh
+      .getRange(1, 8, lastRow, existingCols)
+      .getValues()
+      .forEach((r, i) =>
+        r.forEach((v, j) => {
+          if (_cellText(v)) {
+            throw new Error(
+              `차량_마스터 ${"HIJ"[j]}${i + 1} 에 값이 있습니다 ("${_cellText(v)}"). ` +
+                `H~J 는 전담자 · 전담자부서 · 출장차량 전용입니다 — 다른 열로 옮긴 뒤 다시 실행하세요.`,
+            );
+          }
+        }),
+      );
+  }
+
+  // ── 여기서부터 쓰기 ──
+  const maxCols = masterSh.getMaxColumns();
+  if (maxCols < 10) masterSh.insertColumnsAfter(maxCols, 10 - maxCols);
+
+  const staffRows = staff
+    .map((p) => [_cellText(p && p.name), _cellText(p && p.dept)])
+    .filter(([name]) => name);
+  ss.insertSheet(CONFIG.SHEET_STAFF)
+    .getRange(1, 1, staffRows.length + 1, 2)
+    .setValues([STAFF_HEADER, ...staffRows]);
+  ss.insertSheet(CONFIG.SHEET_CLIENTS)
+    .getRange(1, 1, clients.length + 1, 1)
+    .setValues([CLIENTS_HEADER, ...clients.map((c) => [c])]);
+
+  const fixedUser = {};
+  Object.keys(fixedUserRaw).forEach((k) => {
+    fixedUser[_cellText(k)] = fixedUserRaw[k];
+  });
+  const tripSet = new Set(tripCars);
+  const placed = new Set();
+  let fixedCount = 0;
+  let tripCount = 0;
+  if (lastRow >= 2) {
+    const carNos = masterSh
+      .getRange(2, 1, lastRow - 1, 1)
+      .getValues()
+      .map(([v]) => _cellText(v));
+    const hi = carNos.map((carNo) => {
+      const u = carNo && Object.prototype.hasOwnProperty.call(fixedUser, carNo) ? fixedUser[carNo] : null;
+      if (!u) return ["", ""];
+      placed.add(carNo);
+      fixedCount++;
+      return [_cellText(u.name), _cellText(u.dept)];
+    });
+    const j = carNos.map((carNo) => {
+      const trip = Boolean(carNo) && tripSet.has(carNo);
+      if (trip) {
+        placed.add(carNo);
+        tripCount++;
+      }
+      return [trip];
+    });
+    masterSh.getRange(2, 8, lastRow - 1, 2).setValues(hi);
+    // insertCheckboxes 는 값을 false 로 만들므로 값은 그 뒤에 쓴다.
+    masterSh.getRange(2, 10, lastRow - 1, 1).insertCheckboxes().setValues(j);
+  }
+  // H1:J1 헤더는 마지막에 쓴다 — 중간에 실패하면 헤더가 없어 syncSettings 가 H1:J1 검사에서 멈추고,
+  // 비어 있는 H~J 로 FIXED_USER_JSON · BUSINESS_TRIP_CARS_JSON 을 덮어쓰지 않는다.
+  masterSh.getRange(1, 8, 1, 3).setValues([MASTER_SETTINGS_HEADER]);
+
+  const skipped = [...new Set([...Object.keys(fixedUser), ...tripCars])].filter(
+    (carNo) => carNo && !placed.has(carNo),
+  );
+  skipped.forEach((carNo) =>
+    Logger.log(
+      `경고: ${carNo}: 전담/출장 설정이 있지만 차량_마스터에 없어 옮기지 않았습니다.`,
+    ),
+  );
+  const result = {
+    staff: staffRows.length,
+    clients: clients.length,
+    fixedUser: fixedCount,
+    businessTripCars: tripCount,
+    skipped,
+  };
+  Logger.log(
+    `migrateConfigToSheets: 직원 ${result.staff}명 · 거래처 ${result.clients}곳 · ` +
+      `전담 ${result.fixedUser}대 · 출장 ${result.businessTripCars}대 · 건너뜀 [${skipped.join(", ")}]`,
+  );
+  Logger.log("이관 완료 — 시트를 확인한 뒤 syncSettings 를 실행하세요.");
+  return result;
+}
+
+// ── 설정 시트 반영 (시트를 고친 뒤 수동 실행) ─────────────────────────
+// 직원 · 거래처 · 차량_마스터를 기준으로 차량 탭과 Script Properties 를 맞춘다. 여러 번 실행해도 결과 동일.
+// - props: CAR_META_JSON · STAFF_JSON · CLIENTS_JSON · FIXED_USER_JSON · BUSINESS_TRIP_CARS_JSON
+//          (폼·보드는 시트가 아니라 이 props 를 읽는다 — 시트를 고치면 이 함수를 실행해야 반영된다)
+// - 반납일 있음        → 차량 탭 숨김 (삭제·이름 변경 안 함: 04:00 재정렬·백업 유지)
+// - 반납일 없음 + 숨김 → 숨김 해제 (반납 취소)
+// - 탭 없음            → 기존 차량 탭 복제로 생성, 15행 이하 비움 (직전 계기판 오염 방지)
+//                        머리말(1~14행)은 원본 차량 값이 남으므로 손으로 고친다 — 코드는 머리말을 읽지 않는다
+// - G1 빈칸            → 위치기록여부 첫 도입(반납 아닌 차량 체크). 이후엔 G 값을 그대로 따른다
+// - RAW 에만 있는 차량번호 → 경고 (주차 보드는 마스터 기준이라 나오지 않음)
+// 반납 판정(입력 차단) 자체는 isRetiredCar 의 날짜 규칙을 따른다 — 숨김은 화면용.
+function syncSettings() {
+  const ss = getSpreadsheet();
+  const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
+  // 읽기·검증을 모두 끝낸 뒤에만 시트·props 를 바꾼다.
+  const { carMeta, warnings, hasLocationCol, fixedUser, businessTripCars } =
+    _readCarMaster(masterSh);
+  const { staff, warnings: staffWarnings } = _readStaff(ss);
+  const clients = _readClients(ss);
+  warnings.push(...staffWarnings);
+  const carNos = Object.keys(carMeta);
+
+  // 바꾸기 전에 검증 — 중간에 실패해 일부 차량만 반영되는 상태를 만들지 않는다.
+  const toCreate = carNos.filter(
+    (c) => !carMeta[c].반납일 && !ss.getSheetByName(c),
+  );
+  // 복제 원본: 반납 안 된 차량 탭 우선(최신 양식일 가능성이 높다), 없으면 반납 차량 탭
+  const sourceCar =
+    carNos.find((c) => !carMeta[c].반납일 && ss.getSheetByName(c)) ||
+    carNos.find((c) => ss.getSheetByName(c));
+  if (toCreate.length > 0 && !sourceCar) {
+    throw new Error(
+      `새 탭을 만들 원본이 없습니다 — 차량_마스터의 차량 중 탭이 있는 차량이 없습니다. ` +
+        `기존 차량 탭 이름이 마스터 A열과 같은지 확인하세요. (생성 대상: ${toCreate.join(", ")})`,
+    );
+  }
+  const source = sourceCar ? ss.getSheetByName(sourceCar) : null;
+
+  const headerCell = masterSh.getRange(1, 6);
+  if (String(headerCell.getValue()).trim() === "") headerCell.setValue("반납일");
+  if (!hasLocationCol) {
+    const todayStr = Utilities.formatDate(new Date(), "Asia/Seoul", "yyyy-MM-dd");
+    _initLocationColumn(masterSh, carMeta, todayStr);
+  }
+  _unregisteredRawCars(ss, carMeta).forEach((carNo) =>
+    warnings.push(
+      `${carNo}: RAW 에 기록이 있지만 차량_마스터에 없어 주차 보드에 나오지 않습니다.`,
+    ),
+  );
+
+  const result = { created: [], hidden: [], shown: [], warnings };
+  carNos.forEach((carNo) => {
+    const 반납일 = carMeta[carNo].반납일;
+    const sh = ss.getSheetByName(carNo);
+
+    if (반납일) {
+      if (sh && !sh.isSheetHidden()) {
+        sh.hideSheet();
+        result.hidden.push(carNo);
+      }
+      return;
+    }
+
+    if (sh) {
+      if (sh.isSheetHidden()) {
+        sh.showSheet();
+        result.shown.push(carNo);
+      }
+      return;
+    }
+
+    const created = source.copyTo(ss).setName(carNo);
+    const lastRow = created.getLastRow();
+    if (lastRow >= CONFIG.DATA_START_ROW) {
+      created
+        .getRange(
+          CONFIG.DATA_START_ROW,
+          1,
+          lastRow - CONFIG.DATA_START_ROW + 1,
+          CAR_TOTAL_COLS,
+        )
+        .clearContent();
+    }
+    created.showSheet();
+    result.created.push(carNo);
+  });
+
+  // 마지막 행 아래에 추가한 행은 G 체크박스가 없어 FALSE 로 읽힌다 — 신규 차량이 보드에서 빠지지 않게 알린다.
+  result.created
+    .filter((carNo) => carMeta[carNo].위치기록 === false)
+    .forEach((carNo) =>
+      warnings.push(
+        `${carNo}: G열 위치기록여부가 체크되지 않아 주차 보드에 나오지 않습니다 — 보드에 띄우려면 G 를 체크하고 다시 실행하세요.`,
+      ),
+    );
+
+  const props = PropertiesService.getScriptProperties();
   props.setProperty("CAR_META_JSON", JSON.stringify(carMeta));
+  props.setProperty("STAFF_JSON", JSON.stringify(staff));
+  props.setProperty("CLIENTS_JSON", JSON.stringify(clients));
+  props.setProperty("FIXED_USER_JSON", JSON.stringify(fixedUser));
+  props.setProperty("BUSINESS_TRIP_CARS_JSON", JSON.stringify(businessTripCars));
+  const cache = CacheService.getScriptCache();
+  cache.remove("parking_board");
+  cache.removeAll(carNos.map(_prevOdoCacheKey));
 
   Logger.log(
-    "설정 완료: 직원 " +
-      config.staff.length +
-      "명, 차량 " +
-      (Object.keys(config.fixedUser).length + config.businessTripCars.length) +
-      "대, 차량 메타 " +
-      Object.keys(carMeta).length +
-      "대 캐싱",
+    `syncSettings: 생성 [${result.created.join(", ")}] · 숨김 [${result.hidden.join(", ")}] · ` +
+      `숨김 해제 [${result.shown.join(", ")}] · 차량 메타 ${carNos.length}대 · ` +
+      `직원 ${staff.length}명 · 거래처 ${clients.length}곳 · ` +
+      `전담 ${Object.keys(fixedUser).length}대 · 출장 ${businessTripCars.length}대`,
   );
+  if (result.created.length > 0) {
+    Logger.log(
+      `새 탭 [${result.created.join(", ")}] 은 ${sourceCar} 탭을 복제했습니다 — ` +
+        `머리말(1~14행)의 차량 정보를 새 차량으로 고치세요.`,
+    );
+  }
+  result.warnings.forEach((w) => Logger.log("경고: " + w));
+  return result;
 }
 
 // ── 주차현황 보드 서빙 ────────────────────────────────────────────────

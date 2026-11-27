@@ -6,3 +6,8 @@ config.json
 *.md
 .gitignore
 .claspignore
+test/
+test/**
+package.json
+package-lock.json
+config.html

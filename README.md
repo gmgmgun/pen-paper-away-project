@@ -45,12 +45,12 @@ PPAP는 기존의 번거로운 법인 차량 운행 수기 기록 방식을 디�
 
 ## 🗂 차량 구분
 
-차량은 `config.json`에서 두 가지 유형으로 관리됩니다.
+차량은 `차량_마스터` 시트에서 두 가지 유형으로 관리됩니다(고친 뒤 `syncSettings()` 실행).
 
-| 유형                 | 설명                                                          | 설정 키            |
-| :------------------- | :------------------------------------------------------------ | :----------------- |
-| **고정 사용자 차량** | 특정 직원 전용 차량. 성명 자동 입력.                          | `fixedUser`        |
-| **출장용 차량**      | 여러 직원이 공용으로 사용. 성명 선택 + 방문 거래처 필수 입력. | `businessTripCars` |
+| 유형                 | 설명                                                          | 설정 위치                                  |
+| :------------------- | :------------------------------------------------------------ | :----------------------------------------- |
+| **고정 사용자 차량** | 특정 직원 전용 차량. 성명 자동 입력.                          | H `전담자`, I `전담자부서`                 |
+| **출장용 차량**      | 여러 직원이 공용으로 사용. 성명 선택 + 방문 거래처 필수 입력. | J `출장차량` 체크 (거래처 목록은 `거래처` 시트) |
 
 ## 📈 Expected Impact (B&A)
 
@@ -62,12 +62,13 @@ PPAP는 기존의 번거로운 법인 차량 운행 수기 기록 방식을 디�
 
 ## ⚙️ Setup
 
-1. `config.json`에서 직원 목록, 고정 사용자 차량, 출장용 차량 정보를 수정합니다.
-2. `clasp push`로 GAS에 코드를 배포합니다.
-3. GAS 편집기에서 `setupProperties()` 함수를 **수동으로 한 번 실행**하여 Script Properties에 설정값을 저장합니다.
-4. 웹앱을 재배포(New Deployment)하면 변경 사항이 적용됩니다.
+1. 스프레드시트에서 설정을 고칩니다.
+   - 직원 목록: `직원` 시트 (A `이름`, B `부서`)
+   - 출장 시 방문 거래처: `거래처` 시트 (A `거래처`)
+   - 전담 차량·출장 차량: `차량_마스터` H `전담자`, I `전담자부서`, J `출장차량`(체크박스)
+2. GAS 편집기에서 `syncSettings()`를 실행해 Script Properties에 반영합니다.
 
-> ⚠️ `config.json`을 수정한 경우, `clasp push` 후 반드시 `setupProperties()`를 다시 실행해야 합니다.
+> ⚠️ 폼은 시트가 아니라 Script Properties를 읽습니다. 시트를 고친 뒤 `syncSettings()`를 실행해야 반영됩니다.
 
 ## 🤖 자동 배포 (GitHub Actions)
 
@@ -102,11 +103,11 @@ GitHub repo → **Settings → Secrets and variables → Actions → New reposit
    - 프로젝트 이름을 `PPAP (TEST)` 로 변경
    - 프로젝트 설정 → **스크립트 ID** 복사
 3. **테스트 GAS 의 시간대 설정** : 프로젝트 설정 → 시간대 `Asia/Seoul`
-4. **테스트 GAS 의 ScriptProperty 사전 세팅** (운영 ID 폴백 방지):
+4. **테스트 GAS 의 ScriptProperty 사전 세팅** (없으면 모든 실행이 `SPREADSHEET_ID` 오류로 멈춤):
    - 프로젝트 설정 → 스크립트 속성 → 속성 추가
    - 키: `SPREADSHEET_ID`, 값: 위에서 복사한 **테스트 Sheets ID**
 5. **첫 webapp 배포** (수동, 1회만):
-   - 테스트 GAS 편집기에서 `setupProperties()` 1회 실행
+   - 테스트 GAS 편집기에서 `syncSettings()` 1회 실행
    - "배포 관리" → 새 배포 → **웹앱** 유형 → 배포
    - 받은 **테스트 URL** 메모, **배포 ID** 복사
 6. **GitHub Secret 등록**:
@@ -145,28 +146,28 @@ feature 작업 → staging 푸시
 2. environment=prod, **skip_deploy=true** 선택 → 실행
 3. 나중에 deploy 만 원할 때 다시 Run workflow → skip_deploy=false
 
-### config.html 처리
+### 설정 시트
 
-`config.html` 은 직원/차량/거래처 데이터를 담고 있어 git 에는 커밋되지 않지만, `clasp push -f` 가 원격 파일을 로컬과 강제 동기화하면서 GAS 에서 삭제하는 문제가 있습니다.
+직원·거래처·전담·출장 설정은 스프레드시트에서 관리합니다(예전 `config.html` + `CONFIG_HTML` secret 방식은 없앴습니다).
+시트를 고친 뒤 GAS 편집기에서 `syncSettings()`를 실행하면 Script Properties에 반영됩니다. test·prod는 각자 자기 시트를 씁니다.
 
-**해결**: CI 가 push 직전에 `CONFIG_HTML` secret 에서 `config.html` 을 복원한 뒤 push.
+**환경별 1회 이관** (config.html 을 쓰던 환경):
 
-1. 로컬 `config.html` 전체 내용을 GitHub Secret `CONFIG_HTML` 로 등록
-2. CI 가 매번 secret 에서 파일 생성 → clasp 가 정상 push → GAS 의 config.html 유지
-3. Secret 미설정 시 워크플로우는 **에러로 중단** (보호 장치)
+1. 배포 (test: staging push / prod: main 머지). 이때 GAS 의 `config.html` 은 지워지지만 Script Properties 는 그대로라 폼은 정상입니다.
+2. GAS 편집기에서 `migrateConfigToSheets()` 실행 → `직원`·`거래처` 시트와 `차량_마스터` H~J 확인
+3. `syncSettings()` 실행 → 폼에서 성명 목록·전담 차량·출장 차량 확인
 
-`config.html` 내용 변경이 필요하면: 로컬 파일 수정 → `CONFIG_HTML` secret 갱신 → staging/main 푸시. 운영/테스트 양쪽에 동일한 config 적용됨 (분리가 필요하면 환경별 secret 분리 검토).
-
-`config.json` 은 여전히 `.claspignore` 에 있고 사용되지 않으므로 손대지 않음.
+1과 2 사이에 `syncSettings()`를 실행하면 시트가 없다는 오류로 멈추고 아무것도 바뀌지 않습니다.
+prod 까지 이관이 끝나면 GitHub secret `CONFIG_HTML` 을 삭제합니다(먼저 지우면 머지 전 main 의 배포 워크플로가 실패합니다).
 
 ### 트러블슈팅
 
 - **`CLASPRC_JSON secret is not set`** : secret 등록 누락.
 - **`GAS_SCRIPT_ID_TEST secret is not set`** : staging 푸시 전 테스트 환경 셋업 누락.
-- **`CONFIG_HTML secret 미설정`** : 로컬 `config.html` 내용을 그대로 secret 으로 등록 필요.
 - **`Could not read API credentials`** : clasp 토큰 만료. 로컬에서 `clasp login --no-localhost` 후 secret 재등록.
-- **테스트 GAS 가 운영 Sheets 를 건드림** : 위 2번 4단계(`SPREADSHEET_ID` 사전 세팅)를 생략한 경우. ScriptProperty 확인 후 `setupProperties()` 재실행.
-- **GAS 에서 파일이 갑자기 사라짐** : `clasp push -f` 가 .claspignore 파일도 삭제하는 케이스. secret 주입 방식(`CONFIG_HTML`)으로 처리하거나, .claspignore 가 안 통하면 secret 으로 복원.
+- **`SPREADSHEET_ID 스크립트 속성이 없습니다`** : 위 2번 4단계(`SPREADSHEET_ID` 사전 세팅) 누락. 코드에 기본 ID 가 없으므로 환경마다 직접 넣어야 합니다.
+- **테스트 GAS 가 운영 Sheets 를 건드림** : 테스트 GAS 의 `SPREADSHEET_ID` 에 운영 ID 가 들어간 경우. 테스트 Sheets ID 로 고친 뒤 `syncSettings()` 재실행.
+- **GAS 에서 파일이 갑자기 사라짐** : `clasp push -f` 는 로컬에 없거나 .claspignore 에 있는 파일을 GAS 에서 지웁니다. GAS 편집기에서만 만든 파일은 저장소에 커밋해야 남습니다.
 
 ---
 
