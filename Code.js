@@ -61,6 +61,12 @@ const CAR_TOTAL_COLS = 44;
 function getSpreadsheet() {
   const id =
     PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
+  // 코드에 기본 ID 를 두지 않는다 — 빠졌을 때 다른 환경(운영) 시트를 건드리지 않고 바로 멈추게.
+  if (!id) {
+    throw new Error(
+      "SPREADSHEET_ID 스크립트 속성이 없습니다 — 프로젝트 설정 → 스크립트 속성에 이 환경의 스프레드시트 ID 를 넣으세요.",
+    );
+  }
   return SpreadsheetApp.openById(id);
 }
 
@@ -877,46 +883,6 @@ function setupDailyResyncTrigger() {
   Logger.log("dailyResyncCarSheets 트리거 등록 완료 (매일 04:00 KST)");
 }
 
-// ── 초기 설정 (최초 1회 수동 실행) ──────────────────────────────────
-function setupProperties() {
-  const config = JSON.parse(
-    HtmlService.createHtmlOutputFromFile("config").getContent(),
-  );
-  const props = PropertiesService.getScriptProperties();
-
-  // 환경 분리: 테스트 GAS 에서는 사전에 SPREADSHEET_ID 를 세팅해두면
-  // 그 값을 그대로 사용. 비어 있으면 운영 ID 로 폴백.
-  const DEFAULT_PROD_ID = "1sgzKrRD47t8429NpSOiaRJHeRCIBPf98TsqIjlGYU9A";
-  const ssId = props.getProperty("SPREADSHEET_ID") || DEFAULT_PROD_ID;
-  props.setProperty("SPREADSHEET_ID", ssId);
-
-  props.setProperty("STAFF_JSON", JSON.stringify(config.staff));
-  props.setProperty("FIXED_USER_JSON", JSON.stringify(config.fixedUser));
-  props.setProperty(
-    "BUSINESS_TRIP_CARS_JSON",
-    JSON.stringify(config.businessTripCars),
-  );
-  props.setProperty("CLIENTS_JSON", JSON.stringify(config.clients || []));
-
-  const ss = SpreadsheetApp.openById(ssId);
-  const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
-  const { carMeta, warnings } = _readCarMaster(masterSh);
-  props.setProperty("CAR_META_JSON", JSON.stringify(carMeta));
-  // 반납일 변경이 30분 TTL 캐시에 가려지지 않도록 보드 캐시를 비운다.
-  CacheService.getScriptCache().remove("parking_board");
-
-  Logger.log(
-    "설정 완료: 직원 " +
-      config.staff.length +
-      "명, 차량 " +
-      (Object.keys(config.fixedUser).length + config.businessTripCars.length) +
-      "대, 차량 메타 " +
-      Object.keys(carMeta).length +
-      "대 캐싱",
-  );
-  warnings.forEach((w) => Logger.log("경고: " + w));
-}
-
 // ── 차량 메타 (차량_마스터 → CAR_META_JSON) ──────────────────────────
 // 체크박스 값 해석 (G 위치기록여부, J 출장차량). 체크박스 true 또는 손으로 친 "TRUE"(대소문자·공백 무시)만 TRUE.
 function isChecked(value) {
@@ -945,7 +911,7 @@ function _buildCarMeta(rows, hasLocationCol = false) {
   return carMeta;
 }
 
-// 차량_마스터 시트 → { carMeta, warnings, hasLocationCol }. setupProperties / syncCarRegistry 공용.
+// 차량_마스터 시트 → { carMeta, warnings, hasLocationCol, fixedUser, businessTripCars }. syncSettings 가 쓴다.
 // F열은 반납일 전용 — F1 에 다른 헤더가 있으면 기존 F열 데이터를 반납일로 오인해
 // 전 차량이 차단되므로, CAR_META_JSON 을 쓰기 전에 중단한다.
 // G열(위치기록여부)도 같은 이유로 G1 이 빈칸·위치기록여부가 아니면 중단한다.
@@ -966,7 +932,7 @@ function _readCarMaster(masterSh) {
     );
   }
   // G1 이 빈칸인데 G열에 값이 있으면(다른 용도의 값, 또는 도입 후 G1 을 지운 경우)
-  // 첫 sync 마이그레이션이 그 값을 덮어쓰고 setupProperties 는 전 차량을 TRUE 로 본다 — 중단.
+  // 첫 sync 마이그레이션이 그 값을 덮어쓴다 — 중단.
   if (!gHeader) {
     const idx = values.slice(1).findIndex((r) => {
       const v = r[6];
@@ -1091,7 +1057,7 @@ function _returnDateWarnings(carMeta) {
     );
 }
 
-// G열(위치기록여부) 첫 도입. G1 이 빈칸일 때 syncCarRegistry 가 모든 검증 뒤 한 번 호출한다.
+// G열(위치기록여부) 첫 도입. G1 이 빈칸일 때 syncSettings 가 모든 검증 뒤 한 번 호출한다.
 // 반납 아닌 차량은 체크, 반납 차량·차량번호 빈 행은 해제. 쓴 값으로 carMeta 위치기록을 맞춘다.
 // insertCheckboxes 는 값을 false 로 만들므로 값은 그 뒤에 쓴다.
 function _initLocationColumn(masterSh, carMeta, todayStr) {
@@ -1131,8 +1097,10 @@ function _unregisteredRawCars(ss, carMeta) {
   return [...found];
 }
 
-// ── 차량 반납·추가 반영 (필요할 때 수동 실행) ─────────────────────────
-// 차량_마스터를 기준으로 차량 탭과 CAR_META_JSON 을 맞춘다. 여러 번 실행해도 결과 동일.
+// ── 설정 시트 반영 (시트를 고친 뒤 수동 실행) ─────────────────────────
+// 직원 · 거래처 · 차량_마스터를 기준으로 차량 탭과 Script Properties 를 맞춘다. 여러 번 실행해도 결과 동일.
+// - props: CAR_META_JSON · STAFF_JSON · CLIENTS_JSON · FIXED_USER_JSON · BUSINESS_TRIP_CARS_JSON
+//          (폼·보드는 시트가 아니라 이 props 를 읽는다 — 시트를 고치면 이 함수를 실행해야 반영된다)
 // - 반납일 있음        → 차량 탭 숨김 (삭제·이름 변경 안 함: 04:00 재정렬·백업 유지)
 // - 반납일 없음 + 숨김 → 숨김 해제 (반납 취소)
 // - 탭 없음            → 기존 차량 탭 복제로 생성, 15행 이하 비움 (직전 계기판 오염 방지)
@@ -1140,10 +1108,15 @@ function _unregisteredRawCars(ss, carMeta) {
 // - G1 빈칸            → 위치기록여부 첫 도입(반납 아닌 차량 체크). 이후엔 G 값을 그대로 따른다
 // - RAW 에만 있는 차량번호 → 경고 (주차 보드는 마스터 기준이라 나오지 않음)
 // 반납 판정(입력 차단) 자체는 isRetiredCar 의 날짜 규칙을 따른다 — 숨김은 화면용.
-function syncCarRegistry() {
+function syncSettings() {
   const ss = getSpreadsheet();
   const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
-  const { carMeta, warnings, hasLocationCol } = _readCarMaster(masterSh);
+  // 읽기·검증을 모두 끝낸 뒤에만 시트·props 를 바꾼다.
+  const { carMeta, warnings, hasLocationCol, fixedUser, businessTripCars } =
+    _readCarMaster(masterSh);
+  const { staff, warnings: staffWarnings } = _readStaff(ss);
+  const clients = _readClients(ss);
+  warnings.push(...staffWarnings);
   const carNos = Object.keys(carMeta);
 
   // 바꾸기 전에 검증 — 중간에 실패해 일부 차량만 반영되는 상태를 만들지 않는다.
@@ -1220,17 +1193,21 @@ function syncCarRegistry() {
       ),
     );
 
-  PropertiesService.getScriptProperties().setProperty(
-    "CAR_META_JSON",
-    JSON.stringify(carMeta),
-  );
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty("CAR_META_JSON", JSON.stringify(carMeta));
+  props.setProperty("STAFF_JSON", JSON.stringify(staff));
+  props.setProperty("CLIENTS_JSON", JSON.stringify(clients));
+  props.setProperty("FIXED_USER_JSON", JSON.stringify(fixedUser));
+  props.setProperty("BUSINESS_TRIP_CARS_JSON", JSON.stringify(businessTripCars));
   const cache = CacheService.getScriptCache();
   cache.remove("parking_board");
   cache.removeAll(carNos.map(_prevOdoCacheKey));
 
   Logger.log(
-    `syncCarRegistry: 생성 [${result.created.join(", ")}] · 숨김 [${result.hidden.join(", ")}] · ` +
-      `숨김 해제 [${result.shown.join(", ")}] · 차량 메타 ${carNos.length}대`,
+    `syncSettings: 생성 [${result.created.join(", ")}] · 숨김 [${result.hidden.join(", ")}] · ` +
+      `숨김 해제 [${result.shown.join(", ")}] · 차량 메타 ${carNos.length}대 · ` +
+      `직원 ${staff.length}명 · 거래처 ${clients.length}곳 · ` +
+      `전담 ${Object.keys(fixedUser).length}대 · 출장 ${businessTripCars.length}대`,
   );
   if (result.created.length > 0) {
     Logger.log(
