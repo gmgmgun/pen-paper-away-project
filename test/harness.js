@@ -125,8 +125,14 @@ function loadGas(overrides = {}) {
 // saveRecord / _updateRecordInner / syncAllCarSheets 가 쓰는 범위만 구현.
 // grid 는 0-indexed 2차원 배열, GAS 의 행/열은 1-based 라 변환해서 접근한다.
 
-function makeSheet(name, grid = []) {
+// maxColumns: GAS 시트의 최대 열 수(getMaxColumns). 기본값은 새 시트와 같은 26 또는 grid 폭 중 큰 값.
+// getRange 는 최대 열을 강제하지 않는다 — insertColumnsAfter 호출 여부는 getMaxColumns 로 확인한다.
+function makeSheet(name, grid = [], { maxColumns } = {}) {
   const g = grid.map((r) => r.slice());
+  let maxCols =
+    maxColumns === undefined
+      ? Math.max(26, g.reduce((max, r) => Math.max(max, r.length), 0))
+      : maxColumns;
   let sheetName = name;
   let hidden = false;
   let owner = null; // 소속 가짜 스프레드시트 — setName 시 이름 맵 갱신용
@@ -179,6 +185,12 @@ function makeSheet(name, grid = []) {
 
     getLastColumn() {
       return g.reduce((max, r) => Math.max(max, r.length), 0);
+    },
+
+    getMaxColumns: () => maxCols,
+    insertColumnsAfter(after, howMany) {
+      maxCols += howMany;
+      return sheet;
     },
 
     getRange(row, col, numRows = 1, numCols = 1) {
@@ -241,6 +253,13 @@ function makeSpreadsheet(sheetsByName) {
     getSheetByName: (n) => sheets[n] || null,
     getSheets: () => Object.values(sheets),
     _sheets: sheets,
+    // GAS 처럼 같은 이름이 있으면 실패, 없으면 빈 시트를 붙여 돌려준다.
+    insertSheet(name) {
+      if (sheets[name]) throw new Error(`이미 있는 시트 이름: ${name}`);
+      const sh = makeSheet(name, []);
+      ss._add(sh);
+      return sh;
+    },
     _add(sheet) {
       sheets[sheet.getName()] = sheet;
       sheet._attach(ss);

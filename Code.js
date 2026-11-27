@@ -1097,6 +1097,123 @@ function _unregisteredRawCars(ss, carMeta) {
   return [...found];
 }
 
+// ── 설정 시트 이관 (환경별 1회 수동 실행) ─────────────────────────────
+// 지금 Script Properties 의 STAFF_JSON · CLIENTS_JSON · FIXED_USER_JSON · BUSINESS_TRIP_CARS_JSON 을
+// 직원 · 거래처 시트와 차량_마스터 H~J 로 옮긴다. config.html 이 아니라 props 를 읽으므로 각 환경이 자기 값을 옮기고,
+// 배포로 GAS 의 config.html 이 지워진 뒤에도 실행할 수 있다. props 는 쓰지 않는다 — 이어서 syncSettings 가 시트에서 다시 만든다.
+// 검사를 모두 끝낸 뒤에만 쓴다: STAFF_JSON 없음 · 설정 시트가 이미 있음 · 마스터 H~J 에 값이 있음 → throw.
+function migrateConfigToSheets() {
+  const ss = getSpreadsheet();
+  const props = PropertiesService.getScriptProperties();
+  const staff = JSON.parse(props.getProperty("STAFF_JSON") || "[]");
+  if (!Array.isArray(staff) || staff.length === 0) {
+    throw new Error(
+      "STAFF_JSON 이 비어 있어 옮길 직원이 없습니다 — 이 환경의 Script Properties 를 확인하세요.",
+    );
+  }
+  const fixedUserRaw = JSON.parse(props.getProperty("FIXED_USER_JSON") || "{}");
+  const tripCars = JSON.parse(props.getProperty("BUSINESS_TRIP_CARS_JSON") || "[]").map(_cellText);
+  const clients = JSON.parse(props.getProperty("CLIENTS_JSON") || "[]").map(_cellText).filter(Boolean);
+
+  [CONFIG.SHEET_STAFF, CONFIG.SHEET_CLIENTS].forEach((name) => {
+    if (ss.getSheetByName(name)) {
+      throw new Error(
+        `${name} 시트가 이미 있습니다 — 이관은 환경마다 한 번만 합니다. 시트를 고쳤다면 syncSettings 를 실행하세요.`,
+      );
+    }
+  });
+
+  const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
+  const lastRow = masterSh.getLastRow();
+  // 시트에 아직 없는 열(최대 열 수 밖)은 읽지 않는다 — GAS 는 범위가 시트 밖이면 throw.
+  const existingCols = Math.min(3, masterSh.getMaxColumns() - 7);
+  if (lastRow >= 1 && existingCols > 0) {
+    masterSh
+      .getRange(1, 8, lastRow, existingCols)
+      .getValues()
+      .forEach((r, i) =>
+        r.forEach((v, j) => {
+          if (_cellText(v)) {
+            throw new Error(
+              `차량_마스터 ${"HIJ"[j]}${i + 1} 에 값이 있습니다 ("${_cellText(v)}"). ` +
+                `H~J 는 전담자 · 전담자부서 · 출장차량 전용입니다 — 다른 열로 옮긴 뒤 다시 실행하세요.`,
+            );
+          }
+        }),
+      );
+  }
+
+  // ── 여기서부터 쓰기 ──
+  const maxCols = masterSh.getMaxColumns();
+  if (maxCols < 10) masterSh.insertColumnsAfter(maxCols, 10 - maxCols);
+
+  const staffRows = staff
+    .map((p) => [_cellText(p && p.name), _cellText(p && p.dept)])
+    .filter(([name]) => name);
+  ss.insertSheet(CONFIG.SHEET_STAFF)
+    .getRange(1, 1, staffRows.length + 1, 2)
+    .setValues([STAFF_HEADER, ...staffRows]);
+  ss.insertSheet(CONFIG.SHEET_CLIENTS)
+    .getRange(1, 1, clients.length + 1, 1)
+    .setValues([CLIENTS_HEADER, ...clients.map((c) => [c])]);
+
+  masterSh.getRange(1, 8, 1, 3).setValues([MASTER_SETTINGS_HEADER]);
+  const fixedUser = {};
+  Object.keys(fixedUserRaw).forEach((k) => {
+    fixedUser[_cellText(k)] = fixedUserRaw[k];
+  });
+  const tripSet = new Set(tripCars);
+  const placed = new Set();
+  let fixedCount = 0;
+  let tripCount = 0;
+  if (lastRow >= 2) {
+    const carNos = masterSh
+      .getRange(2, 1, lastRow - 1, 1)
+      .getValues()
+      .map(([v]) => _cellText(v));
+    const hi = carNos.map((carNo) => {
+      const u = carNo && Object.prototype.hasOwnProperty.call(fixedUser, carNo) ? fixedUser[carNo] : null;
+      if (!u) return ["", ""];
+      placed.add(carNo);
+      fixedCount++;
+      return [_cellText(u.name), _cellText(u.dept)];
+    });
+    const j = carNos.map((carNo) => {
+      const trip = Boolean(carNo) && tripSet.has(carNo);
+      if (trip) {
+        placed.add(carNo);
+        tripCount++;
+      }
+      return [trip];
+    });
+    masterSh.getRange(2, 8, lastRow - 1, 2).setValues(hi);
+    // insertCheckboxes 는 값을 false 로 만들므로 값은 그 뒤에 쓴다.
+    masterSh.getRange(2, 10, lastRow - 1, 1).insertCheckboxes().setValues(j);
+  }
+
+  const skipped = [...new Set([...Object.keys(fixedUser), ...tripCars])].filter(
+    (carNo) => carNo && !placed.has(carNo),
+  );
+  skipped.forEach((carNo) =>
+    Logger.log(
+      `경고: ${carNo}: 전담/출장 설정이 있지만 차량_마스터에 없어 옮기지 않았습니다.`,
+    ),
+  );
+  const result = {
+    staff: staffRows.length,
+    clients: clients.length,
+    fixedUser: fixedCount,
+    businessTripCars: tripCount,
+    skipped,
+  };
+  Logger.log(
+    `migrateConfigToSheets: 직원 ${result.staff}명 · 거래처 ${result.clients}곳 · ` +
+      `전담 ${result.fixedUser}대 · 출장 ${result.businessTripCars}대 · 건너뜀 [${skipped.join(", ")}]`,
+  );
+  Logger.log("이관 완료 — 시트를 확인한 뒤 syncSettings 를 실행하세요.");
+  return result;
+}
+
 // ── 설정 시트 반영 (시트를 고친 뒤 수동 실행) ─────────────────────────
 // 직원 · 거래처 · 차량_마스터를 기준으로 차량 탭과 Script Properties 를 맞춘다. 여러 번 실행해도 결과 동일.
 // - props: CAR_META_JSON · STAFF_JSON · CLIENTS_JSON · FIXED_USER_JSON · BUSINESS_TRIP_CARS_JSON
