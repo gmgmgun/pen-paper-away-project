@@ -345,3 +345,40 @@ test("이관 뒤 syncSettings 는 이관 전과 같은 props 를 만든다", () 
     assert.deepEqual(JSON.parse(props[key]), JSON.parse(DEFAULT_PROPS[key]), key);
   }
 });
+
+test("이관이 H~J 쓰기 중에 실패하면 syncSettings 는 H1:J1 에서 멈추고 전담·출장 props 를 비우지 않는다", () => {
+  const { gas, ss, props } = migrateFixture();
+  const master = ss.getSheetByName(MASTER);
+  const getRange = master.getRange;
+  master.getRange = (row, col, numRows, numCols) => {
+    const range = getRange(row, col, numRows, numCols);
+    if (row === 2 && col === 8) {
+      range.setValues = () => {
+        throw new Error("Service Spreadsheets failed");
+      };
+    }
+    return range;
+  };
+
+  assert.throws(() => gas.migrateConfigToSheets(), /Service Spreadsheets failed/);
+  master.getRange = getRange;
+
+  assert.throws(() => gas.syncSettings(), /H1:J1/);
+  assert.equal(props.FIXED_USER_JSON, DEFAULT_PROPS.FIXED_USER_JSON);
+  assert.equal(props.BUSINESS_TRIP_CARS_JSON, DEFAULT_PROPS.BUSINESS_TRIP_CARS_JSON);
+});
+
+test("이관: 전담·출장·거래처 prop 모양이 잘못되면 아무것도 바꾸기 전에 throw", () => {
+  for (const [key, value] of [
+    ["FIXED_USER_JSON", "null"],
+    ["FIXED_USER_JSON", "[]"],
+    ["BUSINESS_TRIP_CARS_JSON", "{}"],
+    ["CLIENTS_JSON", "null"],
+  ]) {
+    const { gas, ss } = migrateFixture({ props: { ...DEFAULT_PROPS, [key]: value } });
+
+    assert.throws(() => gas.migrateConfigToSheets(), new RegExp(key), `${key}=${value}`);
+    assert.equal(ss.getSheetByName(STAFF), null, `${key}=${value}`);
+    assert.equal(ss.getSheetByName(MASTER).getRange(1, 8).getValue(), "", `${key}=${value}`);
+  }
+});

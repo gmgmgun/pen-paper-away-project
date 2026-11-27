@@ -1111,14 +1111,35 @@ function migrateConfigToSheets() {
       "STAFF_JSON 이 비어 있어 옮길 직원이 없습니다 — 이 환경의 Script Properties 를 확인하세요.",
     );
   }
-  const fixedUserRaw = JSON.parse(props.getProperty("FIXED_USER_JSON") || "{}");
-  const tripCars = JSON.parse(props.getProperty("BUSINESS_TRIP_CARS_JSON") || "[]").map(_cellText);
-  const clients = JSON.parse(props.getProperty("CLIENTS_JSON") || "[]").map(_cellText).filter(Boolean);
+  // 모양 검사도 쓰기 전에 — 중간에 TypeError 로 멈추면 시트만 반쯤 생긴다.
+  const readProp = (key, fallback, ok, shape) => {
+    const v = JSON.parse(props.getProperty(key) || fallback);
+    if (!ok(v)) {
+      throw new Error(
+        `${key} 가 ${shape} 모양이 아닙니다 — 이 환경의 Script Properties 를 확인하세요.`,
+      );
+    }
+    return v;
+  };
+  const fixedUserRaw = readProp(
+    "FIXED_USER_JSON",
+    "{}",
+    (v) => v !== null && typeof v === "object" && !Array.isArray(v),
+    "{차량번호: {name, dept}}",
+  );
+  const tripCars = readProp("BUSINESS_TRIP_CARS_JSON", "[]", Array.isArray, "[차량번호]").map(
+    _cellText,
+  );
+  const clients = readProp("CLIENTS_JSON", "[]", Array.isArray, "[거래처]")
+    .map(_cellText)
+    .filter(Boolean);
 
   [CONFIG.SHEET_STAFF, CONFIG.SHEET_CLIENTS].forEach((name) => {
     if (ss.getSheetByName(name)) {
       throw new Error(
-        `${name} 시트가 이미 있습니다 — 이관은 환경마다 한 번만 합니다. 시트를 고쳤다면 syncSettings 를 실행하세요.`,
+        `${name} 시트가 이미 있습니다 — 이관은 환경마다 한 번만 합니다. ` +
+          `이관 로그에 "이관 완료" 가 남았으면 syncSettings 를 실행하세요. ` +
+          `중간에 멈췄으면 직원 · 거래처 시트를 지우고 차량_마스터 H~J 를 비운 뒤 다시 이관하세요.`,
       );
     }
   });
@@ -1157,7 +1178,6 @@ function migrateConfigToSheets() {
     .getRange(1, 1, clients.length + 1, 1)
     .setValues([CLIENTS_HEADER, ...clients.map((c) => [c])]);
 
-  masterSh.getRange(1, 8, 1, 3).setValues([MASTER_SETTINGS_HEADER]);
   const fixedUser = {};
   Object.keys(fixedUserRaw).forEach((k) => {
     fixedUser[_cellText(k)] = fixedUserRaw[k];
@@ -1190,6 +1210,9 @@ function migrateConfigToSheets() {
     // insertCheckboxes 는 값을 false 로 만들므로 값은 그 뒤에 쓴다.
     masterSh.getRange(2, 10, lastRow - 1, 1).insertCheckboxes().setValues(j);
   }
+  // H1:J1 헤더는 마지막에 쓴다 — 중간에 실패하면 헤더가 없어 syncSettings 가 H1:J1 검사에서 멈추고,
+  // 비어 있는 H~J 로 FIXED_USER_JSON · BUSINESS_TRIP_CARS_JSON 을 덮어쓰지 않는다.
+  masterSh.getRange(1, 8, 1, 3).setValues([MASTER_SETTINGS_HEADER]);
 
   const skipped = [...new Set([...Object.keys(fixedUser), ...tripCars])].filter(
     (carNo) => carNo && !placed.has(carNo),
