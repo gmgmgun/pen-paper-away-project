@@ -980,17 +980,59 @@ function _returnDateWarnings(carMeta) {
     );
 }
 
+// G열(위치기록여부) 첫 도입. G1 이 빈칸일 때 syncCarRegistry 가 모든 검증 뒤 한 번 호출한다.
+// 반납 아닌 차량은 체크, 반납 차량·차량번호 빈 행은 해제. 쓴 값으로 carMeta 위치기록을 맞춘다.
+// insertCheckboxes 는 값을 false 로 만들므로 값은 그 뒤에 쓴다.
+function _initLocationColumn(masterSh, carMeta, todayStr) {
+  masterSh.getRange(1, 7).setValue("위치기록여부");
+  const lastRow = masterSh.getLastRow();
+  if (lastRow < 2) return;
+  const values = masterSh
+    .getRange(2, 1, lastRow - 1, 1)
+    .getValues()
+    .map(([v]) => {
+      const carNo = String(v == null ? "" : v).trim();
+      if (!carNo || !carMeta[carNo]) return [false];
+      const tracked = !isRetiredCar(carMeta[carNo].반납일, todayStr);
+      carMeta[carNo].위치기록 = tracked;
+      return [tracked];
+    });
+  masterSh.getRange(2, 7, lastRow - 1, 1).insertCheckboxes().setValues(values);
+}
+
+// RAW 에 기록이 있지만 차량_마스터에 없는 차량번호(trim, 처음 나온 순서, 중복 없음).
+// 보드는 마스터 기준이라 이런 차량은 보드에서 사라진다 — sync 경고로 알린다.
+function _unregisteredRawCars(ss, carMeta) {
+  const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
+  if (!rawSh) return [];
+  const lastRow = rawSh.getLastRow();
+  if (lastRow < 2) return [];
+  const found = new Set();
+  rawSh
+    .getRange(2, COL.차량번호 + 1, lastRow - 1, 1)
+    .getValues()
+    .forEach(([v]) => {
+      const carNo = String(v == null ? "" : v).trim();
+      if (carNo && !Object.prototype.hasOwnProperty.call(carMeta, carNo)) {
+        found.add(carNo);
+      }
+    });
+  return [...found];
+}
+
 // ── 차량 반납·추가 반영 (필요할 때 수동 실행) ─────────────────────────
 // 차량_마스터를 기준으로 차량 탭과 CAR_META_JSON 을 맞춘다. 여러 번 실행해도 결과 동일.
 // - 반납일 있음        → 차량 탭 숨김 (삭제·이름 변경 안 함: 04:00 재정렬·백업 유지)
 // - 반납일 없음 + 숨김 → 숨김 해제 (반납 취소)
 // - 탭 없음            → 기존 차량 탭 복제로 생성, 15행 이하 비움 (직전 계기판 오염 방지)
 //                        머리말(1~14행)은 원본 차량 값이 남으므로 손으로 고친다 — 코드는 머리말을 읽지 않는다
+// - G1 빈칸            → 위치기록여부 첫 도입(반납 아닌 차량 체크). 이후엔 G 값을 그대로 따른다
+// - RAW 에만 있는 차량번호 → 경고 (주차 보드는 마스터 기준이라 나오지 않음)
 // 반납 판정(입력 차단) 자체는 isRetiredCar 의 날짜 규칙을 따른다 — 숨김은 화면용.
 function syncCarRegistry() {
   const ss = getSpreadsheet();
   const masterSh = ss.getSheetByName(CONFIG.SHEET_MASTER);
-  const { carMeta, warnings } = _readCarMaster(masterSh);
+  const { carMeta, warnings, hasLocationCol } = _readCarMaster(masterSh);
   const carNos = Object.keys(carMeta);
 
   // 바꾸기 전에 검증 — 중간에 실패해 일부 차량만 반영되는 상태를 만들지 않는다.
@@ -1011,6 +1053,15 @@ function syncCarRegistry() {
 
   const headerCell = masterSh.getRange(1, 6);
   if (String(headerCell.getValue()).trim() === "") headerCell.setValue("반납일");
+  if (!hasLocationCol) {
+    const todayStr = Utilities.formatDate(new Date(), "Asia/Seoul", "yyyy-MM-dd");
+    _initLocationColumn(masterSh, carMeta, todayStr);
+  }
+  _unregisteredRawCars(ss, carMeta).forEach((carNo) =>
+    warnings.push(
+      `${carNo}: RAW 에 기록이 있지만 차량_마스터에 없어 주차 보드에 나오지 않습니다.`,
+    ),
+  );
 
   const result = { created: [], hidden: [], shown: [], warnings };
   carNos.forEach((carNo) => {

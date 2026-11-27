@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const { loadGas, loadGasWithSheets, makeSheet, parseDate } = require("./harness");
 
 const MASTER = "차량_마스터";
+const RAW = "RAW_운행일지";
 const OLD_CAR = "12가3456";
 const ACTIVE_CAR = "34나5678";
 const NEW_CAR = "78라1234";
@@ -32,7 +33,14 @@ const CONFIG_FILE = JSON.stringify({
 });
 
 // OLD_CAR 탭은 항상 있다(15행 주행후 1000). extraTabs 로 다른 차량 탭을 더 둘 수 있다.
-function registryFixture({ rows, fHeader = "", gHeader = "", extraTabs = {} }) {
+// rawCars 가 있으면 차량번호만 채운 RAW_운행일지 시트를 만든다.
+function registryFixture({
+  rows,
+  fHeader = "",
+  gHeader = "",
+  extraTabs = {},
+  rawCars = [],
+}) {
   const header = MASTER_HEADER.slice();
   header[5] = fHeader;
   header[6] = gHeader;
@@ -43,6 +51,14 @@ function registryFixture({ rows, fHeader = "", gHeader = "", extraTabs = {} }) {
   Object.entries(extraTabs).forEach(([name, grid]) => {
     sheets[name] = makeSheet(name, grid);
   });
+  if (rawCars.length > 0) {
+    const rawRows = rawCars.map((carNo) => {
+      const r = new Array(17).fill("");
+      r[1] = carNo; // COL.차량번호
+      return r;
+    });
+    sheets[RAW] = makeSheet(RAW, [new Array(17).fill("헤더"), ...rawRows]);
+  }
   return loadGasWithSheets({
     sheets,
     scriptProps: { CAR_META_JSON: "{}" },
@@ -198,6 +214,7 @@ test("복제할 기존 차량 탭이 없으면 아무것도 바꾸기 전에 thr
 
   assert.equal(props.CAR_META_JSON, "{}");
   assert.equal(ss.getSheetByName(MASTER).getRange(1, 6).getValue(), "");
+  assert.equal(ss.getSheetByName(MASTER).getRange(1, 7).getValue(), "");
   assert.equal(ss.getSheetByName(NEW_CAR), null);
 });
 
@@ -337,4 +354,86 @@ test("G1 이 다른 헤더면 setupProperties 도 throw", () => {
   assert.throws(() => gas.setupProperties(), /G1/);
 
   assert.equal(props.CAR_META_JSON, "{}");
+});
+
+// ── G열 첫 도입(마이그레이션)과 RAW 미등록 차량 경고 ──
+
+test("G1 이 비면 첫 sync 가 헤더와 체크박스를 쓴다 — 반납 아닌 차량만 체크", () => {
+  const { gas, ss, props } = registryFixture({
+    rows: [masterRow(OLD_CAR), masterRow(ACTIVE_CAR, "2020-01-01")],
+    extraTabs: { [ACTIVE_CAR]: carTabGrid("운행기록부", 2000) },
+  });
+
+  gas.syncCarRegistry();
+
+  const master = ss.getSheetByName(MASTER);
+  assert.equal(master.getRange(1, 7).getValue(), "위치기록여부");
+  assert.equal(master.getRange(2, 7).getValue(), true);
+  assert.equal(master.getRange(3, 7).getValue(), false);
+  assert.ok(
+    master._checkboxRanges.some(
+      (r) => r.row === 2 && r.col === 7 && r.numRows === 2,
+    ),
+  );
+  assert.equal(meta(props)[OLD_CAR].위치기록, true);
+  assert.equal(meta(props)[ACTIVE_CAR].위치기록, false);
+});
+
+test("첫 sync 마이그레이션: 미래 반납일 차량은 아직 운행 중이라 체크", () => {
+  const { gas, ss } = registryFixture({
+    rows: [masterRow(OLD_CAR, "2999-12-31")],
+  });
+
+  gas.syncCarRegistry();
+
+  assert.equal(ss.getSheetByName(MASTER).getRange(2, 7).getValue(), true);
+});
+
+test("첫 sync 마이그레이션: 차량번호가 빈 행이 있어도 깨지지 않고 그 행은 FALSE", () => {
+  const { gas, ss, props } = registryFixture({
+    rows: [
+      masterRow(OLD_CAR),
+      ["", "", "", "", "", "", ""],
+      masterRow(ACTIVE_CAR),
+    ],
+    extraTabs: { [ACTIVE_CAR]: carTabGrid("운행기록부", 2000) },
+  });
+
+  gas.syncCarRegistry();
+
+  const master = ss.getSheetByName(MASTER);
+  assert.equal(master.getRange(2, 7).getValue(), true);
+  assert.equal(master.getRange(3, 7).getValue(), false);
+  assert.equal(master.getRange(4, 7).getValue(), true);
+  assert.equal(meta(props)[OLD_CAR].위치기록, true);
+  assert.equal(meta(props)[ACTIVE_CAR].위치기록, true);
+});
+
+test("G1 이 이미 있으면 sync 는 G 값을 덮어쓰지 않는다", () => {
+  const { gas, ss } = registryFixture({
+    rows: [masterRow(OLD_CAR, "", false)],
+    gHeader: "위치기록여부",
+  });
+
+  gas.syncCarRegistry();
+  gas.syncCarRegistry();
+
+  const master = ss.getSheetByName(MASTER);
+  assert.equal(master.getRange(2, 7).getValue(), false);
+  assert.equal(master._checkboxRanges.length, 0);
+});
+
+test("RAW 에만 있는 차량번호는 sync 경고로 남는다", () => {
+  const { gas } = registryFixture({
+    rows: [masterRow(OLD_CAR)],
+    rawCars: [OLD_CAR, "99하9999", "99하9999 "],
+  });
+
+  const res = gas.syncCarRegistry();
+
+  assert.equal(res.warnings.filter((w) => w.includes("99하9999")).length, 1);
+  assert.ok(!res.warnings.some((w) => w.includes(OLD_CAR)));
+  assert.ok(
+    gas.Logger._logs.some((l) => l.includes("경고:") && l.includes("99하9999")),
+  );
 });

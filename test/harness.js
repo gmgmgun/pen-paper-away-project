@@ -141,6 +141,7 @@ function makeSheet(name, grid = []) {
   const sheet = {
     getName: () => sheetName,
     _grid: g,
+    _checkboxRanges: [], // insertCheckboxes 호출 기록 { row, col, numRows, numCols }
     _attach(ss) {
       owner = ss;
     },
@@ -182,7 +183,7 @@ function makeSheet(name, grid = []) {
 
     getRange(row, col, numRows = 1, numCols = 1) {
       ensure(row + numRows - 1, col + numCols - 1);
-      return {
+      const range = {
         getValues() {
           const out = [];
           for (let i = 0; i < numRows; i++) {
@@ -213,7 +214,16 @@ function makeSheet(name, grid = []) {
           }
           return this;
         },
+        // GAS 는 체크박스 검증을 넣고 값을 false 로 만든다 — 값 덮어쓰기까지 흉내 낸다.
+        insertCheckboxes() {
+          sheet._checkboxRanges.push({ row, col, numRows, numCols });
+          for (let i = 0; i < numRows; i++) {
+            for (let j = 0; j < numCols; j++) g[row - 1 + i][col - 1 + j] = false;
+          }
+          return range;
+        },
       };
+      return range;
     },
 
     getDataRange() {
