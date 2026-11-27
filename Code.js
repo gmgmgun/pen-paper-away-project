@@ -177,20 +177,20 @@ function assertCarActive(carNo, props, now) {
   }
 }
 
-// ── READ: RAW 시트에서 차량별 최근 주차 현황 조회 ────────────────────
+// ── READ: 차량_마스터 차량별 최근 주차 현황 (위치는 RAW 에서) ─────────
 //
-// 초기값등록 행은 운전자 정보가 없으므로 제외
-// 반납 차량(차량_마스터 F열 반납일)은 제외 — RAW 이력은 그대로 두고 보드에서만 뺀다
-// 차량번호별로 타임스탬프 기준 가장 최근 행만 추출
+// 차량 목록은 CAR_META_JSON(차량_마스터 행 순서). RAW 에만 있는 차량번호는 나오지 않는다.
+// 표시 조건: G열 위치기록여부 TRUE(키 없으면 TRUE) + 반납 아님(F열 반납일 다음 날부터 제외)
+// 위치는 차량번호별 타임스탬프 기준 가장 최근 RAW 행. 초기값등록 행도 포함(운전자는 빈칸).
+// RAW 기록이 없으면 미기록 카드(parking·name 빈칸, time "—").
 //
 function _buildParkingBoard() {
   const ss = getSpreadsheet();
   const rawSh = ss.getSheetByName(CONFIG.SHEET_RAW);
-  if (!rawSh) return [];
 
   const props = getAllScriptProps();
   const carMeta = JSON.parse(props.CAR_META_JSON || "{}");
-  const allData = rawSh.getDataRange().getValues().slice(1); // 헤더 제외
+  const allData = rawSh ? rawSh.getDataRange().getValues().slice(1) : []; // 헤더 제외
 
   const now = new Date();
   const todayStr = Utilities.formatDate(now, "Asia/Seoul", "yyyy-MM-dd");
@@ -199,8 +199,6 @@ function _buildParkingBoard() {
   allData.forEach((r) => {
     const carNo = String(r[COL.차량번호]).trim();
     if (!carNo) return;
-    if (String(r[COL.플래그]).includes("초기값등록")) return;
-    if (isRetiredCar(carMeta[carNo]?.반납일, todayStr)) return;
 
     const ts = r[COL.타임스탬프];
     // 문자열/Date 혼합 대비: getTime() 으로 정규화
@@ -226,7 +224,14 @@ function _buildParkingBoard() {
     "yyyy-MM-dd",
   );
 
-  return Object.values(latestMap).map((item) => {
+  const boardCars = Object.keys(carMeta).filter(
+    (carNo) =>
+      carMeta[carNo].위치기록 !== false &&
+      !isRetiredCar(carMeta[carNo].반납일, todayStr),
+  );
+
+  return boardCars.map((carNo) => {
+    const item = latestMap[carNo] || { carNo, parking: "", name: "", dept: "" };
     let timeLabel = "—";
     if (item.ts) {
       const tsDate = new Date(item.ts);
