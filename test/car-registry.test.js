@@ -7,10 +7,39 @@ const RAW = "RAW_운행일지";
 const OLD_CAR = "12가3456";
 const ACTIVE_CAR = "34나5678";
 const NEW_CAR = "78라1234";
-const MASTER_HEADER = ["차량번호", "차종", "메모", "법인명", "사업자번호", "", ""];
+const MASTER_HEADER = [
+  "차량번호",
+  "차종",
+  "메모",
+  "법인명",
+  "사업자번호",
+  "",
+  "",
+  "전담자",
+  "전담자부서",
+  "출장차량",
+];
 
-function masterRow(carNo, 반납일 = "", 위치기록 = "") {
-  return [carNo, "K5", "", "(주)샘플", "123-45-67890", 반납일, 위치기록];
+function masterRow(
+  carNo,
+  반납일 = "",
+  위치기록 = "",
+  전담자 = "",
+  전담자부서 = "",
+  출장 = "",
+) {
+  return [
+    carNo,
+    "K5",
+    "",
+    "(주)샘플",
+    "123-45-67890",
+    반납일,
+    위치기록,
+    전담자,
+    전담자부서,
+    출장,
+  ];
 }
 
 // 1~14행 머리말 + 15행 데이터 1건(T열 = 주행후)
@@ -299,13 +328,13 @@ test("setupProperties 도 날짜가 아닌 반납일을 경고 로그로 남긴�
 
 // ── G열 위치기록여부: 주차 보드 표시 여부 ──
 
-test("isLocationTracked: true 와 문자열 TRUE 만 TRUE", () => {
+test("isChecked: true 와 문자열 TRUE 만 TRUE", () => {
   const gas = loadGas();
   for (const v of [true, "TRUE", " true "]) {
-    assert.equal(gas.isLocationTracked(v), true, String(v));
+    assert.equal(gas.isChecked(v), true, String(v));
   }
   for (const v of [false, "", "FALSE", null, undefined, "Y", 1]) {
-    assert.equal(gas.isLocationTracked(v), false, String(v));
+    assert.equal(gas.isChecked(v), false, String(v));
   }
 });
 

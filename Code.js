@@ -16,6 +16,8 @@
 const CONFIG = {
   SHEET_RAW: "RAW_운행일지",
   SHEET_MASTER: "차량_마스터",
+  SHEET_STAFF: "직원",
+  SHEET_CLIENTS: "거래처",
   MAX_DAILY_KM: 500,
   GAP_ALERT_DAYS: 3,
   DATA_START_ROW: 15,
@@ -916,14 +918,15 @@ function setupProperties() {
 }
 
 // ── 차량 메타 (차량_마스터 → CAR_META_JSON) ──────────────────────────
-// G열 위치기록여부 값 해석. 체크박스 true 또는 손으로 친 "TRUE"(대소문자·공백 무시)만 TRUE.
-function isLocationTracked(value) {
+// 체크박스 값 해석 (G 위치기록여부, J 출장차량). 체크박스 true 또는 손으로 친 "TRUE"(대소문자·공백 무시)만 TRUE.
+function isChecked(value) {
   if (value === true) return true;
   return typeof value === "string" && value.trim().toUpperCase() === "TRUE";
 }
 
 // rows: 헤더를 뺀 차량_마스터 값.
 // 열: A 차량번호 | B 차종 | C (메모, 미사용) | D 법인명 | E 사업자번호 | F 반납일 | G 위치기록여부
+//     | H 전담자 | I 전담자부서 | J 출장차량
 // 차량번호는 trim — 시트명·QR 파라미터와 공백 차이로 어긋나지 않게.
 // hasLocationCol: G1 이 위치기록여부인지. 아직 도입 전(G1 빈칸)이면 모든 차량을 보드에 띄운다.
 function _buildCarMeta(rows, hasLocationCol = false) {
@@ -936,7 +939,7 @@ function _buildCarMeta(rows, hasLocationCol = false) {
       법인명: r[3] || "",
       사업자번호: r[4] || "",
       반납일: normalizeReturnDate(r[5]),
-      위치기록: hasLocationCol ? isLocationTracked(r[6]) : true,
+      위치기록: hasLocationCol ? isChecked(r[6]) : true,
     };
   });
   return carMeta;
@@ -976,9 +979,103 @@ function _readCarMaster(masterSh) {
       );
     }
   }
+  // H~J(전담자·전담자부서·출장차량)는 설정 시트 이관 뒤에만 있다 — 없으면 props 를 비우지 않게 중단.
+  const settingsHeader = [7, 8, 9].map((i) => _cellText(values[0] && values[0][i]));
+  if (settingsHeader.join("|") !== MASTER_SETTINGS_HEADER.join("|")) {
+    throw new Error(
+      `차량_마스터 H1:J1 이 "${MASTER_SETTINGS_HEADER.join(" | ")}" 가 아닙니다 (지금: "${settingsHeader.join(" | ")}"). ` +
+        `처음이면 migrateConfigToSheets 를 먼저 실행하세요.`,
+    );
+  }
   const hasLocationCol = gHeader === "위치기록여부";
-  const carMeta = _buildCarMeta(values.slice(1), hasLocationCol);
-  return { carMeta, warnings: _returnDateWarnings(carMeta), hasLocationCol };
+  const rows = values.slice(1);
+  const carMeta = _buildCarMeta(rows, hasLocationCol);
+  const { fixedUser, businessTripCars } = _buildMasterSettings(rows);
+  return {
+    carMeta,
+    warnings: _returnDateWarnings(carMeta),
+    hasLocationCol,
+    fixedUser,
+    businessTripCars,
+  };
+}
+
+// ── 설정 시트 (직원 · 거래처 · 차량_마스터 H~J) ─────────────────────────
+// syncSettings 가 읽어 STAFF_JSON · CLIENTS_JSON · FIXED_USER_JSON · BUSINESS_TRIP_CARS_JSON 으로 쓴다.
+const STAFF_HEADER = ["이름", "부서"];
+const CLIENTS_HEADER = ["거래처"];
+const MASTER_SETTINGS_HEADER = ["전담자", "전담자부서", "출장차량"];
+
+function _cellText(v) {
+  return String(v == null ? "" : v).trim();
+}
+
+// rows: 헤더를 뺀 차량_마스터 값. H 전담자가 있는 행만 전담 차량, J 가 체크된 행만 출장 차량(마스터 행 순서).
+function _buildMasterSettings(rows) {
+  const fixedUser = {};
+  const businessTripCars = [];
+  rows.forEach((r) => {
+    const carNo = _cellText(r[0]);
+    if (!carNo) return;
+    const name = _cellText(r[7]);
+    if (name) fixedUser[carNo] = { name, dept: _cellText(r[8]) };
+    if (isChecked(r[9])) businessTripCars.push(carNo);
+  });
+  return { fixedUser, businessTripCars };
+}
+
+// 직원 시트 → { staff: [{name, dept}], warnings }. 이름 빈 행은 건너뛰고 시트 순서(= 폼 드롭다운 순서)를 지킨다.
+function _readStaff(ss) {
+  const sh = ss.getSheetByName(CONFIG.SHEET_STAFF);
+  if (!sh) {
+    throw new Error(
+      `${CONFIG.SHEET_STAFF} 시트가 없습니다 — 처음이면 migrateConfigToSheets 를 먼저 실행하세요.`,
+    );
+  }
+  const values = sh.getDataRange().getValues();
+  const header = [0, 1].map((i) => _cellText(values[0] && values[0][i]));
+  if (header.join("|") !== STAFF_HEADER.join("|")) {
+    throw new Error(
+      `${CONFIG.SHEET_STAFF} 시트 1행이 "${STAFF_HEADER.join(" | ")}" 가 아닙니다 (지금: "${header.join(" | ")}").`,
+    );
+  }
+  const staff = values
+    .slice(1)
+    .map((r) => ({ name: _cellText(r[0]), dept: _cellText(r[1]) }))
+    .filter((p) => p.name);
+  if (staff.length === 0) {
+    throw new Error(
+      `${CONFIG.SHEET_STAFF} 시트에 이름이 없습니다 — 이대로 반영하면 폼의 성명 목록이 비게 됩니다.`,
+    );
+  }
+  const seen = new Set();
+  const dup = new Set();
+  staff.forEach((p) => (seen.has(p.name) ? dup.add(p.name) : seen.add(p.name)));
+  const warnings = [...dup].map(
+    (name) => `직원 "${name}" 이 여러 번 있습니다 — 폼은 첫 행의 부서를 씁니다.`,
+  );
+  return { staff, warnings };
+}
+
+// 거래처 시트 → [거래처]. 빈 행은 건너뛰고 시트 순서(= 폼 선택지 순서)를 지킨다. 비어 있어도 된다.
+function _readClients(ss) {
+  const sh = ss.getSheetByName(CONFIG.SHEET_CLIENTS);
+  if (!sh) {
+    throw new Error(
+      `${CONFIG.SHEET_CLIENTS} 시트가 없습니다 — 처음이면 migrateConfigToSheets 를 먼저 실행하세요.`,
+    );
+  }
+  const values = sh.getDataRange().getValues();
+  const header = _cellText(values[0] && values[0][0]);
+  if (header !== CLIENTS_HEADER[0]) {
+    throw new Error(
+      `${CONFIG.SHEET_CLIENTS} 시트 1행이 "${CLIENTS_HEADER[0]}" 가 아닙니다 (지금: "${header}").`,
+    );
+  }
+  return values
+    .slice(1)
+    .map((r) => _cellText(r[0]))
+    .filter(Boolean);
 }
 
 // 날짜 형식이 아닌 반납일은 isRetiredCar 가 즉시 반납으로 보므로 실행 로그로 알린다.
