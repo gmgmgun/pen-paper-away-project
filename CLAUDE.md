@@ -57,7 +57,7 @@ Google Apps Script + Google Sheets 백엔드(`Code.js`), 모바일 웹 폼(`ppap
 
 GAS 에디터에서 직접 실행해야 하는 setup 함수들. 코드 배포만으로는 트리거가 안 걸린다:
 
-- `setupProperties` — `config.json` 변경 후 ScriptProperties 갱신
+- `migrateConfigToSheets` — 환경별 1회. 기존 Script Properties(직원·거래처·전담·출장)를 설정 시트로 이관한 뒤 `syncSettings` 실행 (아래 "설정 시트" 절)
 - `setupExportTrigger` — 매월 1일 자정 Excel 백업 트리거
 - `setupWarmupTrigger` — 5분 워밍업 트리거
 - `setupDailyResyncTrigger` — 매일 04:00 KST 차량 탭 재정렬 (과거 날짜 입력 보정)
@@ -67,39 +67,53 @@ GAS 에디터에서 직접 실행해야 하는 setup 함수들. 코드 배포만
 
 ## 차량 반납·추가 (리스 반납 / 렌트 신규)
 
-`차량_마스터` F열 `반납일`과 G열 `위치기록여부`(체크박스)가 기준이다. 시트를 고친 뒤 GAS 에디터에서 `syncCarRegistry`를 실행한다(인자 없음, 여러 번 실행해도 결과 동일).
+`차량_마스터` F열 `반납일`과 G열 `위치기록여부`(체크박스)가 기준이다. 시트를 고친 뒤 GAS 에디터에서 `syncSettings`를 실행한다(인자 없음, 여러 번 실행해도 결과 동일).
 
-- **반납**: F열에 반납일 입력 → **반드시** `syncCarRegistry` 실행. `CAR_META_JSON`이 갱신되기 전에는 차단되지 않는다.
-  (`setupProperties`도 `CAR_META_JSON`을 다시 만들어 차단은 반영하지만, 탭 숨김·생성은 `syncCarRegistry`만 한다.)
-  - F열은 반납일 전용. F1에 `반납일`이 아닌 다른 값이 있으면 두 함수 모두 아무것도 바꾸기 전에 throw — 다른 용도의 F열 값을 반납일로 오인해 전 차량이 막히는 것을 방지.
+- **반납**: F열에 반납일 입력 → **반드시** `syncSettings` 실행. `CAR_META_JSON`이 갱신되기 전에는 차단되지 않는다.
+  - F열은 반납일 전용. F1에 `반납일`이 아닌 다른 값이 있으면 `syncSettings`는 아무것도 바꾸기 전에 throw — 다른 용도의 F열 값을 반납일로 오인해 전 차량이 막히는 것을 방지.
   - 반납일 **당일까지** 폼 입력 허용, 다음 날부터 폼은 안내 페이지 · 저장은 throw · 주차 보드에서 제외.
   - 차량 탭은 숨김만 한다(삭제·이름 변경 금지 — 04:00 재정렬과 월간 백업에 계속 포함).
   - 날짜가 아닌 값(예: `반납`)은 즉시 반납으로 처리되고 실행 로그에 경고가 남는다.
-- **추가**: 마스터에 행 추가(A 차량번호, B 차종, D 법인명, E 사업자번호, G 체크) → `syncCarRegistry` → 새 탭 머리말의 차량 정보 수정 →
+- **추가**: 마스터에 행 추가(A 차량번호, B 차종, D 법인명, E 사업자번호, G 체크) → `syncSettings` → 새 탭 머리말의 차량 정보 수정 →
   주차 보드에 `미기록` 카드 → 카드의 "운행일지 기록하기"(또는 QR)로 폼에서 "초기값 등록" → 보드에 위치 표시.
   - 새 탭은 기존 차량 탭(반납 안 된 탭 우선)을 복제하고 15행 이하를 비운 것이다. 머리말(1~14행)에는 원본 차량 정보가
     남아 있으므로 새 차량 값으로 고친다. 어느 탭을 복제했는지 실행 로그에 나온다.
-  - sync 로그의 "생성" 목록에 예상하지 못한 차량이 있으면 탭 이름이 마스터 A열과 다른 것이다 — 중복 탭을 지우고 이름을 맞춘다. 전담(`fixedUser`)·출장(`businessTripCars`) 차량이면 `config.html` 수정·배포 후 `setupProperties`도 실행.
-- **보드에서만 빼기**: G 체크 해제 → `syncCarRegistry`. 폼·저장은 그대로(주차위치 필수, RAW 기록 유지)라 다시 체크하면 최신 위치가 바로 보인다.
-- 반납 취소: F열을 비우고 `syncCarRegistry` → 탭 숨김 해제.
+  - sync 로그의 "생성" 목록에 예상하지 못한 차량이 있으면 탭 이름이 마스터 A열과 다른 것이다 — 중복 탭을 지우고 이름을 맞춘다. 전담·출장 차량이면 H~J(전담자·전담자부서·출장차량)도 채우고 `syncSettings`.
+- **보드에서만 빼기**: G 체크 해제 → `syncSettings`. 폼·저장은 그대로(주차위치 필수, RAW 기록 유지)라 다시 체크하면 최신 위치가 바로 보인다.
+- 반납 취소: F열을 비우고 `syncSettings` → 탭 숨김 해제.
 
 ### 주차 보드 표시 규칙
 
 - 차량 목록은 `CAR_META_JSON`(마스터 행 순서), 위치는 RAW 최신 행. 표시 = G TRUE + 반납 아님.
   RAW 기록이 없으면 `미기록` 카드, 초기값등록만 있으면 위치만 표시(운전자 `—`).
 - G 값은 체크박스 TRUE 또는 문자열 `TRUE`만 TRUE, 빈칸은 FALSE.
-- G1 규칙: 비어 있으면 첫 `syncCarRegistry`가 `위치기록여부`를 쓰고 반납 아닌 차량을 체크한다(그 전까지는 전 차량 표시).
-  다른 값이거나, G1은 비었는데 G2 아래에 값이 있으면(G1을 실수로 지운 경우 포함) `setupProperties`·`syncCarRegistry` 모두
+- G1 규칙: 비어 있으면 첫 `syncSettings`가 `위치기록여부`를 쓰고 반납 아닌 차량을 체크한다(그 전까지는 전 차량 표시).
+  다른 값이거나, G1은 비었는데 G2 아래에 값이 있으면(G1을 실수로 지운 경우 포함) `syncSettings`는
   `CAR_META_JSON`을 쓰기 전에 throw — 체크 해제해 둔 값을 마이그레이션이 덮어쓰지 않게.
 - 마스터 맨 아래에 추가한 행에는 체크박스가 없어 G가 FALSE로 읽힌다. sync가 새 탭을 만든 차량의 G가 FALSE면
   `경고: <차량번호>: G열 위치기록여부가 체크되지 않아 …`를 남긴다 — 체크박스를 복사해 넣고 다시 실행한다.
 - sync 로그 `경고: <차량번호>: RAW 에 기록이 있지만 차량_마스터에 없어 …` → 그 차량은 보드에 나오지 않는다.
   운행 중인 차량이면 마스터에 행을 추가하고, 오타 차량번호면 무시한다.
-- 반영 시점은 `syncCarRegistry`(또는 `setupProperties`) 실행 시 — 보드는 시트가 아니라 `CAR_META_JSON`을 읽는다.
+- 반영 시점은 `syncSettings` 실행 시 — 보드는 시트가 아니라 `CAR_META_JSON`을 읽는다.
+
+## 설정 시트 (직원·거래처·전담·출장)
+
+예전 `config.html` + secret `CONFIG_HTML` 대신 시트에서 관리한다. 시트를 고친 뒤 `syncSettings`를 실행해야 반영된다
+(폼은 `STAFF_JSON`·`CLIENTS_JSON`·`FIXED_USER_JSON`·`BUSINESS_TRIP_CARS_JSON` props를 읽는다 — 키·모양은 예전과 같다).
+
+- `직원`: A1 `이름`, B1 `부서`. 행 순서 = 폼 성명 드롭다운 순서. 이름 빈 행은 건너뜀. 같은 이름이 있으면 경고(폼은 첫 행 부서를 씀).
+- `거래처`: A1 `거래처`. 행 순서 = 출장 차량 폼의 거래처 선택지 순서. 비어 있어도 된다.
+- `차량_마스터` H `전담자`, I `전담자부서`, J `출장차량`(체크박스, G와 같은 해석). 전담자가 있는 차량은 폼에서 성명 선택이 없다.
+  전담자는 `직원`에 없어도 된다(부서는 I열 값을 쓴다).
+- `syncSettings` throw(아무것도 바꾸기 전): `직원`·`거래처` 시트 없음 또는 1행 헤더 다름, H1:J1이 `전담자 | 전담자부서 | 출장차량`이 아님, 직원 0명.
+- **환경별 1회 이관**: 배포(이때 GAS의 config.html은 `clasp push -f`로 지워지지만 props는 그대로라 폼 정상) →
+  `migrateConfigToSheets`(지금 props → 시트, props는 안 씀) → 시트 확인 → `syncSettings`.
+  이관 전 `syncSettings`는 throw하고 props는 바뀌지 않는다. 이관은 시트가 이미 있거나 마스터 H~J에 값이 있으면 throw.
+- secret `CONFIG_HTML`은 **prod 이관까지 끝난 뒤** 삭제한다 — main에 머지되기 전까지 main의 `deploy.yml`에는 복원 단계가 남아 있다.
 
 ## 작업 스타일
 
 - 사용자는 1인 개발자, GAS·Sheets에 익숙. 기초 설명 생략, 트레이드오프·파일/라인 단위 코멘트 중심.
 - 한국어 응답. 코드 식별자는 한글 변수명(`차량번호`, `주행전` 등) 자연스럽게 사용.
 - 커밋 메시지·주석·PR 본문 모두 한국어.
-- `SPREADSHEET_ID`는 `Code.js`의 `setupProperties` 안에 하드코딩되어 있어 환경 분리 시 이 부분도 확인.
+- `SPREADSHEET_ID`는 각 GAS 프로젝트의 Script Properties에 직접 넣는다(코드 기본값 없음 — 없으면 `getSpreadsheet()`가 throw).
