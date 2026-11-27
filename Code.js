@@ -911,10 +911,17 @@ function setupProperties() {
 }
 
 // ── 차량 메타 (차량_마스터 → CAR_META_JSON) ──────────────────────────
+// G열 위치기록여부 값 해석. 체크박스 true 또는 손으로 친 "TRUE"(대소문자·공백 무시)만 TRUE.
+function isLocationTracked(value) {
+  if (value === true) return true;
+  return typeof value === "string" && value.trim().toUpperCase() === "TRUE";
+}
+
 // rows: 헤더를 뺀 차량_마스터 값.
-// 열: A 차량번호 | B 차종 | C (메모, 미사용) | D 법인명 | E 사업자번호 | F 반납일
+// 열: A 차량번호 | B 차종 | C (메모, 미사용) | D 법인명 | E 사업자번호 | F 반납일 | G 위치기록여부
 // 차량번호는 trim — 시트명·QR 파라미터와 공백 차이로 어긋나지 않게.
-function _buildCarMeta(rows) {
+// hasLocationCol: G1 이 위치기록여부인지. 아직 도입 전(G1 빈칸)이면 모든 차량을 보드에 띄운다.
+function _buildCarMeta(rows, hasLocationCol = false) {
   const carMeta = {};
   rows.forEach((r) => {
     const carNo = String(r[0] == null ? "" : r[0]).trim();
@@ -924,14 +931,16 @@ function _buildCarMeta(rows) {
       법인명: r[3] || "",
       사업자번호: r[4] || "",
       반납일: normalizeReturnDate(r[5]),
+      위치기록: hasLocationCol ? isLocationTracked(r[6]) : true,
     };
   });
   return carMeta;
 }
 
-// 차량_마스터 시트 → { carMeta, warnings }. setupProperties / syncCarRegistry 공용.
+// 차량_마스터 시트 → { carMeta, warnings, hasLocationCol }. setupProperties / syncCarRegistry 공용.
 // F열은 반납일 전용 — F1 에 다른 헤더가 있으면 기존 F열 데이터를 반납일로 오인해
 // 전 차량이 차단되므로, CAR_META_JSON 을 쓰기 전에 중단한다.
+// G열(위치기록여부)도 같은 이유로 G1 이 빈칸·위치기록여부가 아니면 중단한다.
 function _readCarMaster(masterSh) {
   const values = masterSh.getDataRange().getValues();
   const fHeader = String((values[0] && values[0][5]) || "").trim();
@@ -941,8 +950,16 @@ function _readCarMaster(masterSh) {
         `기존 F열 데이터를 다른 열로 옮기고 F1 을 비우거나 "반납일"로 바꾼 뒤 다시 실행하세요.`,
     );
   }
-  const carMeta = _buildCarMeta(values.slice(1));
-  return { carMeta, warnings: _returnDateWarnings(carMeta) };
+  const gHeader = String((values[0] && values[0][6]) || "").trim();
+  if (gHeader && gHeader !== "위치기록여부") {
+    throw new Error(
+      `차량_마스터 G1 이 "${gHeader}" 입니다. G열은 위치기록여부 전용입니다 — ` +
+        `기존 G열 데이터를 다른 열로 옮기고 G1 을 비우거나 "위치기록여부"로 바꾼 뒤 다시 실행하세요.`,
+    );
+  }
+  const hasLocationCol = gHeader === "위치기록여부";
+  const carMeta = _buildCarMeta(values.slice(1), hasLocationCol);
+  return { carMeta, warnings: _returnDateWarnings(carMeta), hasLocationCol };
 }
 
 // 날짜 형식이 아닌 반납일은 isRetiredCar 가 즉시 반납으로 보므로 실행 로그로 알린다.

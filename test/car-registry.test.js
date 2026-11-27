@@ -6,10 +6,10 @@ const MASTER = "차량_마스터";
 const OLD_CAR = "12가3456";
 const ACTIVE_CAR = "34나5678";
 const NEW_CAR = "78라1234";
-const MASTER_HEADER = ["차량번호", "차종", "메모", "법인명", "사업자번호", ""];
+const MASTER_HEADER = ["차량번호", "차종", "메모", "법인명", "사업자번호", "", ""];
 
-function masterRow(carNo, 반납일 = "") {
-  return [carNo, "K5", "", "(주)샘플", "123-45-67890", 반납일];
+function masterRow(carNo, 반납일 = "", 위치기록 = "") {
+  return [carNo, "K5", "", "(주)샘플", "123-45-67890", 반납일, 위치기록];
 }
 
 // 1~14행 머리말 + 15행 데이터 1건(T열 = 주행후)
@@ -32,9 +32,10 @@ const CONFIG_FILE = JSON.stringify({
 });
 
 // OLD_CAR 탭은 항상 있다(15행 주행후 1000). extraTabs 로 다른 차량 탭을 더 둘 수 있다.
-function registryFixture({ rows, fHeader = "", extraTabs = {} }) {
+function registryFixture({ rows, fHeader = "", gHeader = "", extraTabs = {} }) {
   const header = MASTER_HEADER.slice();
   header[5] = fHeader;
+  header[6] = gHeader;
   const sheets = {
     [MASTER]: makeSheet(MASTER, [header, ...rows]),
     [OLD_CAR]: makeSheet(OLD_CAR, carTabGrid("운행기록부", 1000)),
@@ -221,7 +222,16 @@ test("_buildCarMeta: 빈 차량번호 행은 건너뛰고 Date 반납일을 정�
     법인명: "(주)샘플",
     사업자번호: "123-45-67890",
     반납일: "2026-11-30",
+    위치기록: true,
   });
+
+  // G열이 도입된 마스터(hasLocationCol = true)는 행별 G 값을 따른다
+  const withG = gas._buildCarMeta(
+    [masterRow(OLD_CAR, "", true), masterRow(ACTIVE_CAR, "", "")],
+    true,
+  );
+  assert.equal(withG[OLD_CAR].위치기록, true);
+  assert.equal(withG[ACTIVE_CAR].위치기록, false);
 });
 
 // ── F열 보호: 다른 용도로 쓰이던 F열을 반납일로 오인하면 전 차량이 차단된다 ──
@@ -268,4 +278,63 @@ test("setupProperties 도 날짜가 아닌 반납일을 경고 로그로 남긴�
   assert.ok(
     gas.Logger._logs.some((l) => l.includes("경고") && l.includes(OLD_CAR)),
   );
+});
+
+// ── G열 위치기록여부: 주차 보드 표시 여부 ──
+
+test("isLocationTracked: true 와 문자열 TRUE 만 TRUE", () => {
+  const gas = loadGas();
+  for (const v of [true, "TRUE", " true "]) {
+    assert.equal(gas.isLocationTracked(v), true, String(v));
+  }
+  for (const v of [false, "", "FALSE", null, undefined, "Y", 1]) {
+    assert.equal(gas.isLocationTracked(v), false, String(v));
+  }
+});
+
+test("G1 이 위치기록여부면 행별 G 값을 CAR_META_JSON 위치기록으로 담는다", () => {
+  const { gas, props } = registryFixture({
+    rows: [masterRow(OLD_CAR, "", true), masterRow(ACTIVE_CAR, "", false)],
+    gHeader: "위치기록여부",
+    extraTabs: { [ACTIVE_CAR]: carTabGrid("운행기록부", 2000) },
+  });
+
+  gas.syncCarRegistry();
+
+  assert.equal(meta(props)[OLD_CAR].위치기록, true);
+  assert.equal(meta(props)[ACTIVE_CAR].위치기록, false);
+});
+
+test("G1 이 비어 있으면 setupProperties 는 모든 차량을 위치기록 TRUE 로 담는다", () => {
+  const { gas, props } = registryFixture({
+    rows: [masterRow(OLD_CAR, "", false)],
+  });
+
+  gas.setupProperties();
+
+  assert.equal(meta(props)[OLD_CAR].위치기록, true);
+});
+
+test("G1 이 다른 헤더면 syncCarRegistry 는 아무것도 바꾸기 전에 throw", () => {
+  const { gas, ss, props } = registryFixture({
+    rows: [masterRow(OLD_CAR, "2026-11-30")],
+    gHeader: "비고",
+  });
+
+  assert.throws(() => gas.syncCarRegistry(), /G1/);
+
+  assert.equal(props.CAR_META_JSON, "{}");
+  assert.equal(ss.getSheetByName(OLD_CAR).isSheetHidden(), false);
+  assert.equal(ss.getSheetByName(MASTER).getRange(1, 6).getValue(), "");
+});
+
+test("G1 이 다른 헤더면 setupProperties 도 throw", () => {
+  const { gas, props } = registryFixture({
+    rows: [masterRow(OLD_CAR)],
+    gHeader: "비고",
+  });
+
+  assert.throws(() => gas.setupProperties(), /G1/);
+
+  assert.equal(props.CAR_META_JSON, "{}");
 });
