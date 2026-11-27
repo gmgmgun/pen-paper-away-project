@@ -89,7 +89,10 @@ GAS 에디터에서 직접 실행해야 하는 setup 함수들. 코드 배포만
   RAW 기록이 없으면 `미기록` 카드, 초기값등록만 있으면 위치만 표시(운전자 `—`).
 - G 값은 체크박스 TRUE 또는 문자열 `TRUE`만 TRUE, 빈칸은 FALSE.
 - G1 규칙: 비어 있으면 첫 `syncCarRegistry`가 `위치기록여부`를 쓰고 반납 아닌 차량을 체크한다(그 전까지는 전 차량 표시).
-  다른 값이면 `setupProperties`·`syncCarRegistry` 모두 아무것도 바꾸기 전에 throw.
+  다른 값이거나, G1은 비었는데 G2 아래에 값이 있으면(G1을 실수로 지운 경우 포함) `setupProperties`·`syncCarRegistry` 모두
+  `CAR_META_JSON`을 쓰기 전에 throw — 체크 해제해 둔 값을 마이그레이션이 덮어쓰지 않게.
+- 마스터 맨 아래에 추가한 행에는 체크박스가 없어 G가 FALSE로 읽힌다. sync가 새 탭을 만든 차량의 G가 FALSE면
+  `경고: <차량번호>: G열 위치기록여부가 체크되지 않아 …`를 남긴다 — 체크박스를 복사해 넣고 다시 실행한다.
 - sync 로그 `경고: <차량번호>: RAW 에 기록이 있지만 차량_마스터에 없어 …` → 그 차량은 보드에 나오지 않는다.
   운행 중인 차량이면 마스터에 행을 추가하고, 오타 차량번호면 무시한다.
 - 반영 시점은 `syncCarRegistry`(또는 `setupProperties`) 실행 시 — 보드는 시트가 아니라 `CAR_META_JSON`을 읽는다.

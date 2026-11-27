@@ -962,6 +962,20 @@ function _readCarMaster(masterSh) {
         `기존 G열 데이터를 다른 열로 옮기고 G1 을 비우거나 "위치기록여부"로 바꾼 뒤 다시 실행하세요.`,
     );
   }
+  // G1 이 빈칸인데 G열에 값이 있으면(다른 용도의 값, 또는 도입 후 G1 을 지운 경우)
+  // 첫 sync 마이그레이션이 그 값을 덮어쓰고 setupProperties 는 전 차량을 TRUE 로 본다 — 중단.
+  if (!gHeader) {
+    const idx = values.slice(1).findIndex((r) => {
+      const v = r[6];
+      return v !== "" && v !== null && v !== undefined;
+    });
+    if (idx !== -1) {
+      throw new Error(
+        `차량_마스터 G1 이 비어 있지만 G${idx + 2} 에 값이 있습니다. G열은 위치기록여부 전용입니다 — ` +
+          `체크박스를 쓰던 중이면 G1 을 "위치기록여부"로 되돌리고, 다른 데이터면 다른 열로 옮긴 뒤 다시 실행하세요.`,
+      );
+    }
+  }
   const hasLocationCol = gHeader === "위치기록여부";
   const carMeta = _buildCarMeta(values.slice(1), hasLocationCol);
   return { carMeta, warnings: _returnDateWarnings(carMeta), hasLocationCol };
@@ -1099,6 +1113,15 @@ function syncCarRegistry() {
     created.showSheet();
     result.created.push(carNo);
   });
+
+  // 마지막 행 아래에 추가한 행은 G 체크박스가 없어 FALSE 로 읽힌다 — 신규 차량이 보드에서 빠지지 않게 알린다.
+  result.created
+    .filter((carNo) => carMeta[carNo].위치기록 === false)
+    .forEach((carNo) =>
+      warnings.push(
+        `${carNo}: G열 위치기록여부가 체크되지 않아 주차 보드에 나오지 않습니다 — 보드에 띄우려면 G 를 체크하고 다시 실행하세요.`,
+      ),
+    );
 
   PropertiesService.getScriptProperties().setProperty(
     "CAR_META_JSON",

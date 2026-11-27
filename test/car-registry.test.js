@@ -323,8 +323,9 @@ test("G1 이 위치기록여부면 행별 G 값을 CAR_META_JSON 위치기록으
 });
 
 test("G1 이 비어 있으면 setupProperties 는 모든 차량을 위치기록 TRUE 로 담는다", () => {
+  // G 값이 빈칸이어도(G1 이 위치기록여부였다면 FALSE) 도입 전이므로 TRUE
   const { gas, props } = registryFixture({
-    rows: [masterRow(OLD_CAR, "", false)],
+    rows: [masterRow(OLD_CAR)],
   });
 
   gas.setupProperties();
@@ -436,4 +437,58 @@ test("RAW 에만 있는 차량번호는 sync 경고로 남는다", () => {
   assert.ok(
     gas.Logger._logs.some((l) => l.includes("경고:") && l.includes("99하9999")),
   );
+});
+
+// ── 리뷰 반영: G1 빈칸인데 G열에 값이 있으면 덮어쓰지 않는다 / 신규 차량 G 미체크 경고 ──
+
+test("G1 이 비었는데 G열에 값이 있으면 sync 는 아무것도 바꾸기 전에 throw", () => {
+  // 도입 후 G1 을 실수로 지운 상황 — 마이그레이션이 체크 해제를 되돌리면 안 된다
+  const { gas, ss, props } = registryFixture({
+    rows: [masterRow(OLD_CAR, "", false)],
+  });
+
+  assert.throws(() => gas.syncCarRegistry(), /G1/);
+
+  const master = ss.getSheetByName(MASTER);
+  assert.equal(master.getRange(2, 7).getValue(), false);
+  assert.equal(master.getRange(1, 6).getValue(), "");
+  assert.equal(master._checkboxRanges.length, 0);
+  assert.equal(props.CAR_META_JSON, "{}");
+});
+
+test("G1 이 비었는데 G열에 값이 있으면 setupProperties 도 throw", () => {
+  const { gas, props } = registryFixture({
+    rows: [masterRow(OLD_CAR, "", "메모")],
+  });
+
+  assert.throws(() => gas.setupProperties(), /G1/);
+
+  assert.equal(props.CAR_META_JSON, "{}");
+});
+
+test("새 탭을 만든 차량의 G 가 체크되지 않았으면 보드에 안 나온다고 경고", () => {
+  const { gas } = registryFixture({
+    rows: [masterRow(OLD_CAR, "", true), masterRow(NEW_CAR, "", "")],
+    gHeader: "위치기록여부",
+  });
+
+  const res = gas.syncCarRegistry();
+
+  assert.ok(res.created.includes(NEW_CAR));
+  assert.ok(
+    res.warnings.some((w) => w.includes(NEW_CAR) && w.includes("위치기록여부")),
+  );
+  assert.ok(!res.warnings.some((w) => w.includes(OLD_CAR)));
+});
+
+test("새 탭을 만든 차량의 G 가 체크돼 있으면 경고 없음", () => {
+  const { gas } = registryFixture({
+    rows: [masterRow(OLD_CAR, "", true), masterRow(NEW_CAR, "", true)],
+    gHeader: "위치기록여부",
+  });
+
+  const res = gas.syncCarRegistry();
+
+  assert.ok(res.created.includes(NEW_CAR));
+  assert.equal(res.warnings.length, 0);
 });
